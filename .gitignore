@@ -1,0 +1,18 @@
+# 로그인 세션이 담긴 크롬 프로필 — 절대 커밋 금지
+.chrome-profile/
+
+# 원본 캐시 및 중간 산출물 (용량 크고, 일부 원본에 제3자 성명·주소가 포함됨)
+data/
+*.log
+
+# 파이썬
+__pycache__/
+*.pyc
+
+# 탐색용 임시 스크립트 산출물
+cap*.log
+listen*.log
+p*.log
+est*.log
+ks_test.log
+dashboard.png

@@ -12,7 +12,7 @@ if hasattr(sys.stdout, "reconfigure"):
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
 RAW = DATA / "raw"
-WEB = ROOT / "web"
+WEB = ROOT / "docs"          # GitHub Pages는 / 또는 /docs 만 게시 가능
 for _p in (DATA, RAW, WEB):
     _p.mkdir(parents=True, exist_ok=True)
 

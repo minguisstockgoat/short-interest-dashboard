@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 #  공매도 대시보드 일일 갱신 (저장소 폴더에서 실행)
 #    powershell -ExecutionPolicy Bypass -File .\update.ps1
 #    powershell -ExecutionPolicy Bypass -File .\update.ps1 -Days 10        # 최근 10일만 보강

@@ -1,22 +1,46 @@
 # 국내 공매도 잔고 대시보드
 
+**https://minguisstockgoat.github.io/short-interest-dashboard/**
+
 시총 1조원 이상 개별 보통주(272종목)의 공매도 순보유잔고·증감·상장/유동주식수 대비 비율을
 한 화면에 나열하고, 종목 클릭 시 과거 잔고비율 추이를 보여준다.
 공시 시차(T+2) 구간은 종목별 회귀로 추정한다.
 
+> 시장 데이터를 참고용으로 정리한 개인 프로젝트입니다. 투자 판단의 근거로 쓰기 위한
+> 것이 아니며, 원본 데이터의 정확성을 보증하지 않습니다.
+
 ## 실행
 
 ```powershell
-# 1) 대시보드 보기
+# 대시보드 로컬 보기
 powershell -ExecutionPolicy Bypass -File .\serve.ps1     # → http://127.0.0.1:8765/
 
-# 2) 데이터 갱신 (KRX 로그인 필요)
+# 데이터 갱신 (KRX 공매도만 로그인 필요)
 powershell -ExecutionPolicy Bypass -File .\launch_chrome.ps1   # 크롬 띄우고 직접 로그인
 powershell -ExecutionPolicy Bypass -File .\update.ps1
 
-# KRX가 차단 중이면 공매도 수집만 건너뛰고 나머지 갱신
+# KRX가 차단 중이거나 로그인이 안 됐으면 나머지만 갱신
 powershell -ExecutionPolicy Bypass -File .\update.ps1 -SkipKrxShort
 ```
+
+## 자동 갱신 (평일 18:30)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install_schedule.ps1              # 등록
+powershell -ExecutionPolicy Bypass -File .\install_schedule.ps1 -Time 20:00  # 시각 변경
+powershell -ExecutionPolicy Bypass -File .\install_schedule.ps1 -Uninstall   # 해제
+```
+
+작업 스케줄러가 `daily.ps1` 을 실행한다 → `update.ps1` 로 갱신 → 산출물 검증 →
+`docs/` 변경분 커밋·푸시 → GitHub Pages 자동 재배포. 로그는 `logs/daily_*.log`(30일 보관).
+
+**GitHub Actions로는 못 한다.** 공매도 잔고·거래량이 KRX 로그인 세션을 요구하는데
+Actions는 로그인할 수 없고, 데이터센터 IP는 KRX가 차단한다. 그래서 PC의 작업 스케줄러를 쓴다.
+크롬이 로그인 상태로 떠 있지 않으면 `daily.ps1` 이 자동으로 `-SkipKrxShort` 로 넘어가
+시세·유동주식수·대차잔고만 갱신하고 로그에 남긴다(공매도는 직전 값 유지).
+
+`.ps1` 파일은 **UTF-8 BOM**으로 저장해야 한다. Windows PowerShell 5.1은 BOM이 없으면
+ANSI로 읽어 한글이 깨지고 따옴표 짝이 어긋나 파싱 오류가 난다 → `scripts/fix_ps1_bom.py`.
 
 ## 추정 모델
 
@@ -87,9 +111,13 @@ scripts/
   build_dashboard.py web/dashboard_data.json 생성
   cdp_capture.py     KRX 화면의 bld/파라미터 캡처 (신규 화면 추가용)
   cdp_listen.py      수동 조작 대기형 캡처
-web/
+  scan_secrets.py    공개 저장소 업로드 전 민감정보 점검
+  fix_ps1_bom.py     .ps1 파일 UTF-8 BOM 보정
+  coverage.py        거래일 대비 수집 커버리지·결측 구간 점검
+docs/                GitHub Pages 게시 대상
   index.html         대시보드 (랭킹 테이블 + 종목별 추이 차트)
   dashboard_data.json
+  robots.txt         검색엔진 색인 차단
 data/
   prices.csv  master.csv  universe.csv  free_float.csv
   short_balance.csv  short_volume.csv  short_panel.csv

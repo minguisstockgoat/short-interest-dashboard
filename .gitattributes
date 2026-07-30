@@ -1,0 +1,15 @@
+# 줄바꿈 고정. 셸 스크립트가 CRLF로 체크아웃되면 macOS에서
+# "bad interpreter: /usr/bin/env bash^M" 으로 전부 실패한다.
+* text=auto
+
+*.sh    text eol=lf
+*.py    text eol=lf
+*.json  text eol=lf
+*.md    text eol=lf
+*.plist text eol=lf
+
+# PowerShell은 Windows 전용이므로 CRLF 유지
+*.ps1   text eol=crlf working-tree-encoding=UTF-8
+
+*.gz    binary
+*.png   binary

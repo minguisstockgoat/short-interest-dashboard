@@ -23,21 +23,55 @@ powershell -ExecutionPolicy Bypass -File .\update.ps1
 powershell -ExecutionPolicy Bypass -File .\update.ps1 -SkipKrxShort
 ```
 
-## 자동 갱신 (평일 18:30)
+## 자동 갱신
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\install_schedule.ps1              # 등록
-powershell -ExecutionPolicy Bypass -File .\install_schedule.ps1 -Time 20:00  # 시각 변경
-powershell -ExecutionPolicy Bypass -File .\install_schedule.ps1 -Uninstall   # 해제
+갱신 로직은 `scripts/pipeline.py` 하나에 있고 Windows·macOS 공통이다.
+플랫폼별 스크립트는 얇은 래퍼일 뿐이다.
+
+```
+pipeline.py: 시세 → 유니버스 → 유동주식수 → 대차잔고 → 공매도
+             → 커버리지 점검 → 회귀 추정 → 대시보드 JSON → (--deploy) 커밋·푸시
 ```
 
-작업 스케줄러가 `daily.ps1` 을 실행한다 → `update.ps1` 로 갱신 → 산출물 검증 →
-`docs/` 변경분 커밋·푸시 → GitHub Pages 자동 재배포. 로그는 `logs/daily_*.log`(30일 보관).
+### macOS (상시 구동 맥미니 권장)
 
-**GitHub Actions로는 못 한다.** 공매도 잔고·거래량이 KRX 로그인 세션을 요구하는데
-Actions는 로그인할 수 없고, 데이터센터 IP는 KRX가 차단한다. 그래서 PC의 작업 스케줄러를 쓴다.
-크롬이 로그인 상태로 떠 있지 않으면 `daily.ps1` 이 자동으로 `-SkipKrxShort` 로 넘어가
-시세·유동주식수·대차잔고만 갱신하고 로그에 남긴다(공매도는 직전 값 유지).
+```bash
+bash mac/setup.sh                    # 가상환경 + 의존성 + .env 생성
+tar -xzf bootstrap_data.tar.gz       # Windows에서 만든 데이터 이관 (재수집 회피)
+bash mac/launch_chrome.sh            # 크롬 띄우고 KRX 직접 로그인
+bash mac/doctor.sh                   # 환경 점검
+bash mac/daily.sh                    # 수동 1회
+bash mac/install_schedule.sh         # 평일 18:30 launchd 등록 (시각 변경: 20 00)
+bash mac/install_schedule.sh --uninstall
+```
+
+launchd는 cron과 달리 맥이 잠들어 있던 시간대의 작업을 깨어난 직후 실행한다.
+
+### Windows
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install_schedule.ps1              # 평일 18:30
+powershell -ExecutionPolicy Bypass -File .\install_schedule.ps1 -Time 20:00
+powershell -ExecutionPolicy Bypass -File .\install_schedule.ps1 -Uninstall
+```
+
+### GitHub Actions로는 못 한다
+
+공매도 잔고·거래량이 KRX 로그인 세션을 요구하는데 Actions는 로그인할 수 없고,
+데이터센터 IP는 KRX가 차단한다. 그래서 상시 구동 머신의 스케줄러를 쓴다.
+크롬이 로그인 상태로 떠 있지 않으면 파이프라인이 공매도 단계만 건너뛰고
+나머지를 갱신한 뒤 로그에 남긴다(공매도는 직전 값 유지 — 조용히 실패하지 않는다).
+
+### 데이터 이관
+
+```bash
+python scripts/pack_data.py              # 필수 CSV만 (~43MB)
+python scripts/pack_data.py --with-raw   # 원본 캐시까지 (외부 공개 금지)
+python scripts/pack_data.py --unpack bootstrap_data.tar.gz
+```
+
+새 머신에서 처음부터 수집하면 KRX에 수백 건을 요청하게 되어 IP 차단 위험이 있다.
+아카이브를 옮기면 재수집 없이 이어서 돌릴 수 있다.
 
 `.ps1` 파일은 **UTF-8 BOM**으로 저장해야 한다. Windows PowerShell 5.1은 BOM이 없으면
 ANSI로 읽어 한글이 깨지고 따옴표 짝이 어긋나 파싱 오류가 난다 → `scripts/fix_ps1_bom.py`.
@@ -111,9 +145,18 @@ scripts/
   build_dashboard.py web/dashboard_data.json 생성
   cdp_capture.py     KRX 화면의 bld/파라미터 캡처 (신규 화면 추가용)
   cdp_listen.py      수동 조작 대기형 캡처
+  pipeline.py        일일 갱신 오케스트레이션 (Windows/macOS 공통)
+  pack_data.py       데이터 이관 아카이브 생성/복원
   scan_secrets.py    공개 저장소 업로드 전 민감정보 점검
   fix_ps1_bom.py     .ps1 파일 UTF-8 BOM 보정
   coverage.py        거래일 대비 수집 커버리지·결측 구간 점검
+mac/                 macOS 실행 래퍼
+  setup.sh           최초 셋업 (venv·의존성·.env)
+  launch_chrome.sh   KRX 로그인용 크롬 (원격 디버깅 9222)
+  daily.sh           launchd 진입점
+  install_schedule.sh launchd 등록/해제
+  doctor.sh          환경 점검
+  serve.sh           로컬 서버
 docs/                GitHub Pages 게시 대상
   index.html         대시보드 (랭킹 테이블 + 종목별 추이 차트)
   dashboard_data.json

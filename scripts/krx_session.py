@@ -8,6 +8,7 @@ CDP(Chrome DevTools Protocol)의 Network.getCookies 로 HttpOnly 쿠키(JSESSION
 from __future__ import annotations
 
 import json
+import sys
 import urllib.request
 
 import requests
@@ -35,11 +36,14 @@ def _targets() -> list[dict]:
         with urllib.request.urlopen(f"{CDP_HOST}/json", timeout=5) as r:
             return json.load(r)
     except Exception as e:
-        launcher = (ROOT / "launch_chrome.ps1")
+        if sys.platform == "darwin":
+            how = f"     bash {ROOT / 'mac' / 'launch_chrome.sh'}"
+        else:
+            how = (f"     powershell -ExecutionPolicy Bypass -File "
+                   f"{ROOT / 'launch_chrome.ps1'}")
         raise ChromeNotRunning(
             "127.0.0.1:9222 에 붙을 수 없습니다.\n"
-            "  → 새 PowerShell 창에서 아래를 실행하고 KRX 로그인을 먼저 해주세요.\n"
-            f"     powershell -ExecutionPolicy Bypass -File {launcher}"
+            "  → 아래를 실행하고 KRX 로그인을 먼저 해주세요.\n" + how
         ) from e
 
 

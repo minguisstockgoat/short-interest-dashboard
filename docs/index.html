@@ -521,8 +521,8 @@ function agentDown(){
   $btn.classList.remove('busy');
   $lbl.textContent = '수동 갱신';
   $btn.title = '갱신 서버에 연결할 수 없습니다';
-  setNote(`수동 갱신은 갱신을 수행하는 컴퓨터(맥미니)에서 이 페이지를 열었을 때만 눌립니다.
-           그 컴퓨터에서 <code>bash mac/agent.sh</code> 를 실행해 두세요.
+  setNote(`수동 갱신은 갱신 에이전트가 도는 컴퓨터에서 이 페이지를 열었을 때만 눌립니다.
+           맥미니는 <code>bash mac/agent.sh</code>, 윈도우는 <code>install_agent.ps1</code> 로 띄워 두세요.
            <a href="#" id="setagent">다른 주소 등록</a>`);
   const a = document.getElementById('setagent');
   if(a) a.onclick = e => {

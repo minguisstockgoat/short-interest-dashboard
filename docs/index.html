@@ -82,9 +82,6 @@ header{display:flex; flex-wrap:wrap; gap:14px 20px; align-items:baseline; margin
   border:1px solid var(--border); font:11.5px/1.6 ui-monospace,Menlo,monospace;
   color:var(--ink2); max-height:150px; overflow:auto; white-space:pre-wrap; display:none;
 }
-.cdsbar{display:grid;grid-template-columns:repeat(2,minmax(220px,1fr));gap:10px;margin:14px 0}
-.cdscard{padding:13px 15px}.cdshead{display:flex;justify-content:space-between;gap:10px;color:var(--ink2);font-size:12px}.cdsprice{font-size:25px;font-weight:670;letter-spacing:-.02em;margin:3px 0}.cdsnote{color:var(--muted);font-size:11.5px}.cdslink{color:var(--s1);text-decoration:none}.cdslink:hover{text-decoration:underline}
-@media(max-width:620px){.cdsbar{grid-template-columns:1fr}}
 
 .controls{display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:14px 0 10px}
 input[type=search],select{
@@ -176,7 +173,6 @@ svg{display:block; width:100%; overflow:visible}
 <pre class="proglog" id="proglog"></pre>
 
 <div id="banner"></div>
-<section class="cdsbar" id="cdsbar" aria-label="AI neocloud CDS"></section>
 
 <div class="controls">
   <input type="search" id="q" placeholder="종목명 · 코드 검색" autocomplete="off">
@@ -441,14 +437,6 @@ function detail(code){
 fetch('dashboard_data.json').then(r=>r.json()).then(d=>{
   DATA=d;
   const m=d.meta;
-  if(d.cds&&d.cds.items&&d.cds.items.length){
-    document.getElementById('cdsbar').innerHTML=d.cds.items.map(x=>{
-      const delta=x.prevPrice==null?null:x.eodPrice-x.prevPrice;
-      const cls=delta==null?'zero':delta<0?'up':delta>0?'down':'zero';
-      const change=delta==null?'전일 비교 대기':`${delta>0?'+':''}${delta.toFixed(4)} vs 전일`;
-      return `<article class="card cdscard"><div class="cdshead"><b>${x.entity} 5Y CDS</b><span>${F.date(x.date)}</span></div><div class="cdsprice">${F.num(x.eodPrice,4)}</div><div class="cdsnote">ICE EOD 정산가격 · ${x.couponBp}bp 쿠폰 · <span class="${cls}">${change}</span></div></article>`;
-    }).join('')+`<div class="cdsnote" style="grid-column:1/-1">${d.cds.note} <a class="cdslink" href="${d.cds.sourceUrl}" target="_blank" rel="noopener">ICE 원자료</a></div>`;
-  }
   document.getElementById('meta').innerHTML =
     `기준일 <b>${F.date(m.asof)}</b> · 공매도 확정일 <b>${m.knownDate?F.date(m.knownDate):'–'}</b>
      ${m.shortStaleDays ? `<span class="stale" title="잔고는 T+2 공시가 정상입니다. 그보다 더 밀려 있습니다.">${m.shortStaleDays}거래일 지연</span>` : ''}

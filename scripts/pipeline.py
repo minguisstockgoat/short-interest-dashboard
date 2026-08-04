@@ -124,7 +124,6 @@ def run_pipeline(a) -> int:
          "--min-r2", "0.05"])
 
     log("8. 대시보드 데이터 생성", head=True)
-    run([PY, SCRIPTS / "ice_cds.py"], check=False)
     run([PY, SCRIPTS / "build_dashboard.py"])
 
     # --- 산출물 검증 ---------------------------------------------------
@@ -164,6 +163,11 @@ def run_pipeline(a) -> int:
     if not git("status", "--porcelain", "--", "docs").stdout.strip():
         log("docs 변경 없음 — 배포 생략")
         return 0
+
+    # 맥미니와 이 컴퓨터가 번갈아 푸시하므로, 뒤처진 채 커밋하면 푸시가 계속 막힌다
+    r = git("pull", "--rebase", "--autostash", "-q", "origin", "main", check=False)
+    if r.returncode != 0:
+        log(f"pull 실패(계속 진행): {r.stderr.strip()[:200]}")
 
     git("add", "docs")
     git("commit", "-q", "-m",

@@ -42,10 +42,25 @@ MAX_FAIL_STREAK = 2          # 이만큼 연속 실패하면 잠금 (KRX 계정�
 _VIS = """
 const vis = el => {
   if (!el) return false;
-  const r = el.getBoundingClientRect(), s = getComputedStyle(el);
+  const w = el.ownerDocument.defaultView || window;
+  const r = el.getBoundingClientRect(), s = w.getComputedStyle(el);
   return r.width > 1 && r.height > 1 && s.visibility !== 'hidden' && s.display !== 'none';
 };
-const pwField = () => [...document.querySelectorAll('input[type=password]')].filter(vis)[0];
+// 2026-08 KRX가 로그인 폼을 같은 도메인 iframe(login.jsp) 안으로 옮겼다
+const docs = (() => {
+  const out = [document];
+  for (const f of document.querySelectorAll('iframe')) {
+    try { if (f.contentDocument) out.push(f.contentDocument); } catch (e) {}
+  }
+  return out;
+})();
+const pwField = () => {
+  for (const d of docs) {
+    const hit = [...d.querySelectorAll('input[type=password]')].filter(vis)[0];
+    if (hit) return hit;
+  }
+  return null;
+};
 """
 
 _JS_FIND = _VIS + """
@@ -53,7 +68,7 @@ _JS_FIND = _VIS + """
   const pw = pwField();
   if (!pw) return {ok:false, reason:'비밀번호 입력칸을 찾지 못했습니다',
                    title: document.title, url: location.href};
-  const scope = pw.form || document;
+  const scope = pw.form || pw.ownerDocument;
   const skip = ['hidden','checkbox','radio','submit','button','image','file'];
   const texts = [...scope.querySelectorAll('input')].filter(
       i => i !== pw && vis(i) && !skip.includes(i.type));
@@ -73,7 +88,7 @@ _JS_FILL = _VIS + """
 ((uid, upw) => {
   const pw = pwField();
   if (!pw) return {ok:false, reason:'비밀번호 입력칸 사라짐'};
-  const scope = pw.form || document;
+  const scope = pw.form || pw.ownerDocument;
   const skip = ['hidden','checkbox','radio','submit','button','image','file'];
   const texts = [...scope.querySelectorAll('input')].filter(
       i => i !== pw && vis(i) && !skip.includes(i.type));
@@ -119,7 +134,7 @@ _JS_SUBMIT = _VIS + """
   }
   // 폼 밖에 버튼이 있는 화면 대비 — 비밀번호 칸과 가까운 것부터
   const pr = pw.getBoundingClientRect();
-  const near = [...document.querySelectorAll(sel)].filter(el => vis(el) && looksLogin(el))
+  const near = [...pw.ownerDocument.querySelectorAll(sel)].filter(el => vis(el) && looksLogin(el))
     .map(el => { const r = el.getBoundingClientRect();
                  return {el, d: Math.hypot(r.x - pr.x, r.y - pr.y)}; })
     .filter(o => o.d < 600).sort((a,b) => a.d - b.d);

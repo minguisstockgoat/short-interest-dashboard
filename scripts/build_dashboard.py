@@ -24,6 +24,7 @@ FLOAT_CSV = DATA / "free_float.csv"
 PANEL_CSV = DATA / "short_panel.csv"
 COEF_CSV = DATA / "short_coef.csv"
 ESTIMATE_CSV = DATA / "short_estimate.csv"
+ICE_CDS_CSV = DATA / "ice_cds.csv"
 
 HIST_DAYS = 250
 
@@ -194,22 +195,61 @@ def main() -> None:
             rec["loanQty"] = [_f(v) for v in merged["loan_qty"]]
         series[code] = rec
 
+    # ---- 신선도 -------------------------------------------------------------
+    # 잔고는 T+2 공시라 거래일 2일치 지연은 정상이다. 그보다 더 벌어졌다면
+    # 수집이 멈춘 것이므로 대시보드에 그대로 드러낸다(조용히 낡지 않게).
+    short_lag = short_stale = None
+    if known_date:
+        short_lag = sum(1 for d in all_dates if d > known_date)
+        short_stale = max(0, short_lag - 2)
+
+    short_vol_asof = None
+    if has_short and "short_vol" in panel:
+        sv = panel.dropna(subset=["short_vol"])
+        if not sv.empty:
+            short_vol_asof = sv["date"].max()
+
     payload = {
         "meta": {
             "asof": asof, "knownDate": known_date,
             "universe": len(base), "minMktcap": MIN_MKTCAP,
             "hasShort": bool(has_short),
             "histDays": len(hist_dates),
+            "shortLagDays": short_lag,        # 확정일이 기준일보다 며칠 뒤인지
+            "shortStaleDays": short_stale,    # T+2 정상 지연을 뺀 초과 지연
+            "shortVolAsof": short_vol_asof,
             "generatedAt": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M"),
         },
         "stocks": stocks,
         "series": series,
     }
+    if ICE_CDS_CSV.exists():
+        cds = pd.read_csv(ICE_CDS_CSV, dtype={"clearing_date": str, "ticker": str})
+        cds = cds.sort_values(["ticker", "clearing_date"])
+        items = []
+        for ticker, group in cds.groupby("ticker"):
+            row = group.iloc[-1]
+            items.append({
+                "entity": row["entity"], "ticker": ticker, "name": row["name"],
+                "date": row["clearing_date"], "instrument": row["instrument_name"],
+                "couponBp": _f(row["coupon_bp"]), "eodPrice": _r(row["eod_price"], 4),
+                "prevPrice": _r(group.iloc[-2]["eod_price"], 4) if len(group) > 1 else None,
+            })
+        payload["cds"] = {
+            "source": "ICE Clear Credit",
+            "sourceUrl": "https://status.ice.com/cds-settlement-prices/icc/single-name-instruments",
+            "note": "무료 공개 5년물 단일종목 CDS EOD 정산가격. 가격 하락은 신용위험 프리미엄 확대를 의미합니다.",
+            "items": items,
+        }
+
     DASHBOARD_JSON.write_text(json.dumps(payload, ensure_ascii=False,
                                          separators=(",", ":")), encoding="utf-8")
     mb = DASHBOARD_JSON.stat().st_size / 1e6
     log(f"저장: {DASHBOARD_JSON} ({mb:.1f} MB, {len(stocks)}종목, "
         f"시계열 {len(series)}종목 x {len(hist_dates)}일)")
+    if short_stale:
+        log(f"⚠ 공매도 잔고가 정상(T+2)보다 {short_stale}거래일 더 지연됨 "
+            f"(확정 {known_date} / 기준 {asof})")
 
 
 if __name__ == "__main__":

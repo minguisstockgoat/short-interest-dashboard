@@ -9,7 +9,7 @@
 #  1차 실행이 실패하면 2시간 뒤까지 30분 간격으로 재시도한다.
 # ============================================================
 param(
-    [string]$Time = "18:30",
+    [string]$Time = "22:00",
     [string]$TaskName = "ShortInterestDashboard",
     [switch]$Uninstall
 )

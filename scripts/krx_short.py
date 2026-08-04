@@ -22,7 +22,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import pandas as pd
 
 from common import (DATA, LOAN_BAL_CSV, RAW, SHORT_BAL_CSV, SHORT_VOL_CSV, log)
-from krx_session import JSON_URL, build_session
+from krx_session import JSON_URL, ensure_session
 
 CACHE = RAW / "krx_short"
 CACHE.mkdir(parents=True, exist_ok=True)
@@ -219,7 +219,7 @@ def main() -> None:
     if not (a.start and a.end):
         raise SystemExit("--start/--end 또는 --from-cache 가 필요합니다.")
 
-    session = build_session()
+    session = ensure_session()
     # 거래일 후보: 시세 + 대차잔고의 합집합.
     # KRX 공매도 화면은 시세 OPEN API보다 하루 빠를 때가 있어 시세만 보면 최신일을 놓친다.
     cal: set[str] = set()

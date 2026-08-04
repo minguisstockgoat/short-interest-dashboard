@@ -120,9 +120,39 @@ def check_session(s: requests.Session) -> tuple[bool, str]:
     return False, f"HTTP {r.status_code} / {body[:40]}"
 
 
-if __name__ == "__main__":
+def ensure_session(*, auto_login: bool = True) -> requests.Session:
+    """로그인된 세션을 돌려준다. 없으면 .env 계정으로 한 번 자동 로그인한다.
+
+    krx_login 이 계정 잠금을 막는 시도 횟수 제한을 들고 있으므로, 여기서는
+    재시도 루프를 돌리지 않고 딱 한 번만 위임한다.
+    """
     try:
-        build_session()
+        return build_session()
+    except (ChromeNotRunning, NotLoggedIn) as e:
+        if not auto_login:
+            raise
+        log(f"세션 없음({type(e).__name__}) — 자동 로그인 시도")
+
+    import krx_login
+    if not krx_login.ensure_login():
+        raise NotLoggedIn("자동 로그인 실패 — krx_login.py --status 로 상태를 확인하세요.")
+    return build_session()
+
+
+if __name__ == "__main__":
+    import argparse
+
+    ap = argparse.ArgumentParser(description="KRX 로그인 세션 점검")
+    ap.add_argument("--no-login", action="store_true",
+                    help="자동 로그인 없이 현재 상태만 확인")
+    _a = ap.parse_args()
+    try:
+        if _a.no_login:
+            build_session()
+        else:
+            ensure_session()
         print("\n✅ KRX 로그인 세션 사용 가능. 이제 수집을 시작할 수 있습니다.")
+        sys.exit(0)
     except (ChromeNotRunning, NotLoggedIn) as e:
         print(f"\n❌ {e}")
+        sys.exit(1)          # 호출하는 쉘이 성공으로 오해하지 않도록 반드시 비0

@@ -31,18 +31,25 @@ function Say($msg) {
 
 Say "=== 일일 갱신 시작 ==="
 
-# --- KRX 로그인 세션 확인 -------------------------------------------------
+# --- KRX 로그인 세션 확보 -------------------------------------------------
+#  세션이 없으면 .env 계정으로 자동 로그인을 한 번 시도한다(krx_login.py 가
+#  시도 횟수를 제한하므로 여기서 재시도 루프를 돌리지 않는다).
+#  이전에는 exit code 를 잘못 읽어 세션이 없는데도 "확인됨"으로 진행했고,
+#  그 결과 공매도만 며칠씩 조용히 멈춰 있었다.
 $krxOk = $false
 try {
-    $null = py scripts\krx_session.py 2>&1
+    $loginOut = py scripts\krx_login.py 2>&1
     if ($LASTEXITCODE -eq 0) { $krxOk = $true }
-} catch { }
+    $loginOut | ForEach-Object { Add-Content -Path $log -Value $_ -Encoding UTF8 }
+} catch {
+    Say "krx_login.py 실행 실패: $_"
+}
 
 if ($krxOk) {
-    Say "KRX 로그인 세션 확인됨 — 공매도 포함 전체 갱신"
+    Say "KRX 로그인 세션 확보 — 공매도 포함 전체 갱신"
     $out = powershell -ExecutionPolicy Bypass -File "$PSScriptRoot\update.ps1" -Days $Days 2>&1
 } else {
-    Say "KRX 세션 없음 — 공매도 제외하고 갱신 (크롬 로그인 후 재실행 권장)"
+    Say "KRX 세션 확보 실패 — 공매도 제외하고 갱신 (직전 값 유지)"
     $out = powershell -ExecutionPolicy Bypass -File "$PSScriptRoot\update.ps1" -Days $Days -SkipKrxShort 2>&1
 }
 $out | ForEach-Object { Add-Content -Path $log -Value $_ -Encoding UTF8 }

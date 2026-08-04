@@ -52,6 +52,40 @@ header{display:flex; flex-wrap:wrap; gap:14px 20px; align-items:baseline; margin
 }
 .banner code{background:var(--border); padding:1px 5px; border-radius:4px; font-size:12px}
 
+/* 수동 갱신 — 갱신은 맥미니의 로컬 에이전트가 수행한다 */
+.actions{margin-left:auto; display:flex; align-items:center; gap:9px}
+.btn{
+  font:inherit; font-size:12.5px; font-weight:560; color:var(--ink);
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:7px; padding:6px 12px; cursor:pointer; line-height:1.4;
+  display:inline-flex; align-items:center; gap:7px;
+}
+.btn:hover:not(:disabled){border-color:var(--axis)}
+.btn:disabled{opacity:.5; cursor:not-allowed}
+.btn .spin{
+  width:11px; height:11px; border-radius:50%; display:none;
+  border:1.6px solid var(--axis); border-top-color:transparent;
+  animation:spin .8s linear infinite;
+}
+.btn.busy .spin{display:inline-block}
+@keyframes spin{to{transform:rotate(360deg)}}
+.dot{width:7px; height:7px; border-radius:50%; background:var(--muted); flex:none}
+.dot.on{background:#3fae5a} .dot.off{background:var(--axis)} .dot.err{background:var(--warn)}
+.actnote{color:var(--muted); font-size:11.5px; max-width:280px}
+.stale{
+  display:inline-block; margin-left:8px; padding:1px 7px; border-radius:999px;
+  font-size:11px; font-weight:600; background:rgba(250,178,25,.16);
+  border:1px solid rgba(250,178,25,.4); color:var(--ink);
+}
+.proglog{
+  margin:10px 0 0; padding:9px 12px; border-radius:8px; background:var(--surface);
+  border:1px solid var(--border); font:11.5px/1.6 ui-monospace,Menlo,monospace;
+  color:var(--ink2); max-height:150px; overflow:auto; white-space:pre-wrap; display:none;
+}
+.cdsbar{display:grid;grid-template-columns:repeat(2,minmax(220px,1fr));gap:10px;margin:14px 0}
+.cdscard{padding:13px 15px}.cdshead{display:flex;justify-content:space-between;gap:10px;color:var(--ink2);font-size:12px}.cdsprice{font-size:25px;font-weight:670;letter-spacing:-.02em;margin:3px 0}.cdsnote{color:var(--muted);font-size:11.5px}.cdslink{color:var(--s1);text-decoration:none}.cdslink:hover{text-decoration:underline}
+@media(max-width:620px){.cdsbar{grid-template-columns:1fr}}
+
 .controls{display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:14px 0 10px}
 input[type=search],select{
   font:inherit; color:var(--ink); background:var(--surface);
@@ -131,9 +165,18 @@ svg{display:block; width:100%; overflow:visible}
 <header>
   <h1>국내 공매도 잔고 대시보드</h1>
   <div class="meta" id="meta"></div>
+  <div class="actions">
+    <span class="dot off" id="agentdot" title="갱신 서버 상태"></span>
+    <button class="btn" id="refresh" disabled title="확인 중…">
+      <span class="spin"></span><span id="refreshlabel">수동 갱신</span>
+    </button>
+  </div>
 </header>
+<div class="actnote" id="actnote"></div>
+<pre class="proglog" id="proglog"></pre>
 
 <div id="banner"></div>
+<section class="cdsbar" id="cdsbar" aria-label="AI neocloud CDS"></section>
 
 <div class="controls">
   <input type="search" id="q" placeholder="종목명 · 코드 검색" autocomplete="off">
@@ -398,10 +441,26 @@ function detail(code){
 fetch('dashboard_data.json').then(r=>r.json()).then(d=>{
   DATA=d;
   const m=d.meta;
+  if(d.cds&&d.cds.items&&d.cds.items.length){
+    document.getElementById('cdsbar').innerHTML=d.cds.items.map(x=>{
+      const delta=x.prevPrice==null?null:x.eodPrice-x.prevPrice;
+      const cls=delta==null?'zero':delta<0?'up':delta>0?'down':'zero';
+      const change=delta==null?'전일 비교 대기':`${delta>0?'+':''}${delta.toFixed(4)} vs 전일`;
+      return `<article class="card cdscard"><div class="cdshead"><b>${x.entity} 5Y CDS</b><span>${F.date(x.date)}</span></div><div class="cdsprice">${F.num(x.eodPrice,4)}</div><div class="cdsnote">ICE EOD 정산가격 · ${x.couponBp}bp 쿠폰 · <span class="${cls}">${change}</span></div></article>`;
+    }).join('')+`<div class="cdsnote" style="grid-column:1/-1">${d.cds.note} <a class="cdslink" href="${d.cds.sourceUrl}" target="_blank" rel="noopener">ICE 원자료</a></div>`;
+  }
   document.getElementById('meta').innerHTML =
     `기준일 <b>${F.date(m.asof)}</b> · 공매도 확정일 <b>${m.knownDate?F.date(m.knownDate):'–'}</b>
+     ${m.shortStaleDays ? `<span class="stale" title="잔고는 T+2 공시가 정상입니다. 그보다 더 밀려 있습니다.">${m.shortStaleDays}거래일 지연</span>` : ''}
      · 유니버스 <b>${m.universe}</b>종목 (시총 ${(m.minMktcap/1e12).toFixed(0)}조 이상 개별 보통주)
      · 생성 ${m.generatedAt}`;
+  if(m.shortStaleDays){
+    document.getElementById('banner').innerHTML =
+      `<div class="banner"><b>공매도 잔고가 ${m.shortStaleDays}거래일 더 지연됐습니다</b> —
+       확정일 ${F.date(m.knownDate)} 기준. KRX 수집이 실패하고 있을 수 있습니다
+       (정상은 기준일 대비 T+2). 맥미니에서
+       <code>python scripts/krx_login.py --status</code> 로 세션을 확인하세요.</div>`;
+  }
   if(!m.hasShort){
     document.getElementById('banner').innerHTML =
       `<div class="banner"><b>공매도·대차 데이터 미수집</b> — KRX 로그인 세션이 필요합니다.
@@ -417,6 +476,130 @@ fetch('dashboard_data.json').then(r=>r.json()).then(d=>{
   detail(VIEW[0]?.code);
   SEL = VIEW[0]?.code; render();
 });
+
+/* --------------------------------------------------------- 수동 갱신 버튼
+   GitHub Pages 는 정적 사이트라 페이지가 직접 갱신을 돌릴 수 없다. 갱신을
+   수행하는 머신(맥미니)에서 scripts/refresh_agent.py 를 띄워두면 그쪽으로
+   요청을 보낸다. 브라우저는 https 페이지에서 http 로 나가는 요청을 막지만
+   localhost 만은 예외라서, 에이전트가 도는 그 컴퓨터에서 열었을 때 살아난다.
+   다른 주소(예: 터널로 https 노출)를 쓰려면 버튼을 우클릭해 등록한다. */
+const AGENT = {
+  url: localStorage.getItem('agentUrl') || 'http://127.0.0.1:8766',
+  token: localStorage.getItem('agentToken') || '',
+  on: false, timer: null,
+};
+const $btn  = document.getElementById('refresh');
+const $lbl  = document.getElementById('refreshlabel');
+const $dot  = document.getElementById('agentdot');
+const $note = document.getElementById('actnote');
+const $plog = document.getElementById('proglog');
+
+const agentFetch = (path, opt={}) => fetch(AGENT.url + path, {
+  ...opt, mode:'cors', cache:'no-store',
+  headers: {...(opt.headers||{}), ...(AGENT.token?{'X-Agent-Token':AGENT.token}:{}),
+            ...(opt.body?{'Content-Type':'application/json'}:{})},
+});
+
+function setNote(html){ $note.innerHTML = html || ''; }
+
+function applyStatus(s){
+  AGENT.on = true;
+  $dot.className = 'dot ' + (s.login?.locked ? 'err' : 'on');
+  const busy = !!s.running;
+  $btn.disabled = busy;
+  $btn.classList.toggle('busy', busy);
+  $lbl.textContent = busy ? '갱신 중…' : '수동 갱신';
+
+  const bits = [];
+  const step = s.pipeline?.step;
+  if(busy && step) bits.push(`진행: ${step}`);
+  if(s.login?.locked)
+    bits.push(`<b>KRX 자동 로그인 잠금</b> — 맥미니에서 <code>krx_login.py --reset</code> 필요`);
+  else if(s.keepalive?.status && s.keepalive.status!=='ok')
+    bits.push(`세션 상태: ${s.keepalive.status}`);
+  if(!busy && s.pipeline?.state==='done' && s.pipeline?.asof)
+    bits.push(`마지막 갱신 ${s.pipeline.at?.replace('T',' ').slice(5,16)} · 기준일 ${s.pipeline.asof}`);
+  if(!busy && s.pipeline?.state==='failed')
+    bits.push(`<b>마지막 실행 실패</b> ${(s.pipeline.error||'').slice(0,80)}`);
+  setNote(bits.join(' · '));
+
+  if(busy) pollLog(); else stopPolling();
+}
+
+function agentDown(){
+  AGENT.on = false;
+  $dot.className = 'dot off';
+  $btn.disabled = true;
+  $btn.classList.remove('busy');
+  $lbl.textContent = '수동 갱신';
+  $btn.title = '갱신 서버에 연결할 수 없습니다';
+  setNote(`수동 갱신은 갱신을 수행하는 컴퓨터(맥미니)에서 이 페이지를 열었을 때만 눌립니다.
+           그 컴퓨터에서 <code>bash mac/agent.sh</code> 를 실행해 두세요.
+           <a href="#" id="setagent">다른 주소 등록</a>`);
+  const a = document.getElementById('setagent');
+  if(a) a.onclick = e => {
+    e.preventDefault();
+    const u = prompt('갱신 에이전트 주소', AGENT.url);
+    if(u===null) return;
+    const t = prompt('AGENT_TOKEN (없으면 비워두세요)', AGENT.token);
+    AGENT.url = u.replace(/\/$/,''); AGENT.token = t||'';
+    localStorage.setItem('agentUrl', AGENT.url);
+    localStorage.setItem('agentToken', AGENT.token);
+    checkAgent();
+  };
+}
+
+function checkAgent(){
+  return agentFetch('/status')
+    .then(r => r.ok ? r.json() : Promise.reject(r.status))
+    .then(s => { $btn.title = '지금 데이터를 다시 수집합니다'; applyStatus(s); })
+    .catch(agentDown);
+}
+
+function pollLog(){
+  $plog.style.display = 'block';
+  if(AGENT.timer) return;
+  AGENT.timer = setInterval(() => {
+    agentFetch('/log?n=25').then(r=>r.json()).then(d=>{
+      $plog.textContent = (d.lines||[]).join('\n');
+      $plog.scrollTop = $plog.scrollHeight;
+      if(!d.running){
+        stopPolling();
+        checkAgent();
+        setTimeout(() => location.reload(), 2500);   // 새 dashboard_data.json 반영
+      }
+    }).catch(() => stopPolling());
+  }, 2500);
+}
+
+function stopPolling(){
+  if(AGENT.timer){ clearInterval(AGENT.timer); AGENT.timer = null; }
+}
+
+$btn.onclick = () => {
+  if(!AGENT.on) return;
+  $btn.disabled = true; $btn.classList.add('busy'); $lbl.textContent = '시작 중…';
+  agentFetch('/refresh', {method:'POST', body:JSON.stringify({days:7})})
+    .then(r => r.json())
+    .then(s => {
+      if(s.ok === false) setNote(s.reason || '시작하지 못했습니다.');
+      applyStatus(s);
+      pollLog();
+    })
+    .catch(() => { setNote('갱신 요청이 실패했습니다.'); agentDown(); });
+};
+
+$btn.oncontextmenu = e => {
+  e.preventDefault();
+  const u = prompt('갱신 에이전트 주소', AGENT.url);
+  if(u===null) return;
+  AGENT.url = u.replace(/\/$/,'');
+  localStorage.setItem('agentUrl', AGENT.url);
+  checkAgent();
+};
+
+checkAgent();
+setInterval(() => { if(!AGENT.timer) checkAgent(); }, 30000);
 
 document.getElementById('q').oninput = render;
 document.getElementById('mkt').onchange = render;

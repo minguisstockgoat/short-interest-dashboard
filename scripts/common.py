@@ -16,6 +16,10 @@ WEB = ROOT / "docs"          # GitHub Pages는 / 또는 /docs 만 게시 가능
 for _p in (DATA, RAW, WEB):
     _p.mkdir(parents=True, exist_ok=True)
 
+# 어느 진입점(쉘 래퍼·launchd·수동 실행)에서든 .env 가 실리도록 여기서 한 번 읽는다
+import envfile as _envfile  # noqa: E402
+_envfile.load()
+
 # 산출물 경로
 PRICES_CSV = DATA / "prices.csv"          # 일별 시세 + 상장주식수 (전종목)
 MASTER_CSV = DATA / "master.csv"          # 종목 마스터

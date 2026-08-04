@@ -6,13 +6,15 @@
   python scripts/pipeline.py --skip-krx-short  # KRX 공매도 건너뛰기
   python scripts/pipeline.py --days 14       # 시세·공매도 보강 기간
 
-KRX 공매도(잔고/거래량)만 로그인 세션이 필요하다. 세션이 없으면 그 단계를
-자동으로 건너뛰고 나머지(시세·유동주식수·대차잔고)를 갱신한 뒤 로그에 남긴다.
+KRX 공매도(잔고/거래량)만 로그인 세션이 필요하다. 세션이 없으면 .env 계정으로
+자동 로그인을 한 번 시도하고, 그래도 안 되면 그 단계만 건너뛴 뒤 텔레그램으로
+알린다(조용히 낡은 값을 배포하지 않는다).
 """
 from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -21,6 +23,8 @@ ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = ROOT / "scripts"
 DOCS = ROOT / "docs"
 LOGS = ROOT / "logs"
+DATA = ROOT / "data"
+STATUS = DATA / ".pipeline_status.json"
 PY = sys.executable
 
 
@@ -52,11 +56,16 @@ def git(*args: str, check: bool = True) -> subprocess.CompletedProcess:
     return p
 
 
-def krx_session_ok() -> bool:
-    p = subprocess.run([PY, str(SCRIPTS / "krx_session.py")], cwd=str(ROOT),
-                       capture_output=True, text=True, encoding="utf-8",
-                       errors="replace")
-    return p.returncode == 0 and "사용 가능" in (p.stdout or "")
+def set_status(state: str, **extra) -> None:
+    """진행 상태를 파일로 남긴다 — 대시보드 '수동 갱신' 버튼이 이걸 읽어 보여준다."""
+    DATA.mkdir(parents=True, exist_ok=True)
+    try:
+        payload = {"state": state,
+                   "at": dt.datetime.now().isoformat(timespec="seconds"), **extra}
+        STATUS.write_text(json.dumps(payload, ensure_ascii=False),
+                          encoding="utf-8")
+    except OSError:
+        pass
 
 
 def latest_price_date() -> str:
@@ -66,15 +75,7 @@ def latest_price_date() -> str:
     return sorted(d["date"].unique())[-1]
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--days", type=int, default=7, help="보강 기간(달력일)")
-    ap.add_argument("--loan-days", type=int, default=210)
-    ap.add_argument("--skip-krx-short", action="store_true")
-    ap.add_argument("--skip-float", action="store_true")
-    ap.add_argument("--deploy", action="store_true", help="docs/ 커밋·푸시")
-    a = ap.parse_args()
-
+def run_pipeline(a) -> int:
     today = dt.date.today()
     end = today.strftime("%Y%m%d")
     start = (today - dt.timedelta(days=a.days * 2)).strftime("%Y%m%d")
@@ -82,6 +83,7 @@ def main() -> int:
 
     log("일일 갱신 시작", head=True)
     log(f"플랫폼 {sys.platform} / 파이썬 {sys.version.split()[0]} / 기간 {start}~{end}")
+    set_status("running", step="1/8 시세", source=a.source)
 
     log("1. KRX OPEN API 시세·상장주식수", head=True)
     run([PY, SCRIPTS / "krx_open.py", "--start", start, "--end", end,
@@ -102,14 +104,17 @@ def main() -> int:
          "--workers", "4", "--no-cache"], check=False)
 
     log("5. KRX 공매도 잔고·거래량", head=True)
+    set_status("running", step="5/8 공매도(KRX)", source=a.source)
     if a.skip_krx_short:
         log("건너뜀(--skip-krx-short) — 기존 값 유지")
-    elif not krx_session_ok():
-        log("KRX 로그인 세션 없음 — 공매도는 직전 값 유지")
-        log("  크롬을 로그인 상태로 띄워두면 다음 실행에 자동 수집됩니다.")
     else:
-        run([PY, SCRIPTS / "krx_short.py", "--start", start, "--end", end,
-             "--workers", "2"], check=False)
+        import krx_login
+        if krx_login.ensure_login():
+            run([PY, SCRIPTS / "krx_short.py", "--start", start, "--end", end,
+                 "--workers", "2"], check=False)
+        else:
+            # ensure_login 이 이미 사유별로 텔레그램을 보냈다. 여기선 로그만.
+            log("KRX 로그인 세션 확보 실패 — 공매도는 직전 값 유지")
 
     log("6. 커버리지 점검", head=True)
     run([PY, SCRIPTS / "coverage.py"], check=False)
@@ -119,6 +124,7 @@ def main() -> int:
          "--min-r2", "0.05"])
 
     log("8. 대시보드 데이터 생성", head=True)
+    run([PY, SCRIPTS / "ice_cds.py"], check=False)
     run([PY, SCRIPTS / "build_dashboard.py"])
 
     # --- 산출물 검증 ---------------------------------------------------
@@ -130,10 +136,25 @@ def main() -> int:
     if size < 500_000:
         log(f"중단: dashboard_data.json 이 비정상적으로 작음 ({size:,} bytes)")
         return 1
-    import json
     meta = json.loads(out.read_text(encoding="utf-8"))["meta"]
     log(f"기준일 {meta['asof']} / 확정일 {meta['knownDate']} / "
         f"{meta['universe']}종목 / {size/1e6:.2f} MB")
+
+    # --- 공매도 신선도 경보 ---------------------------------------------
+    # 스케줄러가 돌아도 KRX 단계만 조용히 멈추는 게 실제로 겪은 사고였다.
+    # 정상 지연(T+2)을 넘겨 밀리면 사람에게 알린다.
+    stale = meta.get("shortStaleDays")
+    if stale:
+        import notify
+        notify.send(
+            f"⚠ 공매도 잔고가 {stale}거래일 더 밀려 있습니다.\n"
+            f"확정일 {meta['knownDate']} / 기준일 {meta['asof']}\n"
+            f"KRX 수집이 며칠째 실패하고 있을 수 있습니다. "
+            f"`krx_login.py --status` 로 세션 상태를 확인해 주세요.",
+            dedupe="short-stale", cooldown_h=20)
+    else:
+        import notify
+        notify.clear("short-stale")
 
     # --- 배포 -----------------------------------------------------------
     if not a.deploy:
@@ -157,6 +178,49 @@ def main() -> int:
         old.unlink(missing_ok=True)
     log("완료", head=True)
     return 0
+
+
+def _meta_summary() -> dict:
+    """상태 파일에 실어 보낼 최신 기준일 요약."""
+    out = DOCS / "dashboard_data.json"
+    try:
+        m = json.loads(out.read_text(encoding="utf-8"))["meta"]
+        return {k: m.get(k) for k in
+                ("asof", "knownDate", "shortStaleDays", "generatedAt")}
+    except (OSError, ValueError, KeyError):
+        return {}
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--days", type=int, default=7, help="보강 기간(달력일)")
+    ap.add_argument("--loan-days", type=int, default=210)
+    ap.add_argument("--skip-krx-short", action="store_true")
+    ap.add_argument("--skip-float", action="store_true")
+    ap.add_argument("--deploy", action="store_true", help="docs/ 커밋·푸시")
+    ap.add_argument("--source", default="schedule",
+                    help="실행 출처 (schedule/manual) — 상태 표시에만 쓰인다")
+    a = ap.parse_args()
+
+    try:
+        code = run_pipeline(a)
+    except SystemExit as e:                      # run(check=True) 실패
+        set_status("failed", error=str(e), source=a.source, **_meta_summary())
+        import notify
+        notify.send(f"❌ 갱신 파이프라인이 중단됐습니다.\n{e}",
+                    dedupe="pipeline-failed", cooldown_h=6)
+        raise
+    except Exception as e:
+        set_status("failed", error=f"{type(e).__name__}: {e}", source=a.source,
+                   **_meta_summary())
+        import notify
+        notify.send(f"❌ 갱신 파이프라인 예외: {type(e).__name__} {e}",
+                    dedupe="pipeline-failed", cooldown_h=6)
+        raise
+
+    set_status("done" if code == 0 else "failed", exit=code, source=a.source,
+               **_meta_summary())
+    return code
 
 
 if __name__ == "__main__":

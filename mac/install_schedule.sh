@@ -1,39 +1,57 @@
 #!/usr/bin/env bash
 # ============================================================
-#  매일 자동 갱신 등록 (launchd) — macOS
+#  자동 실행 등록 (launchd) — macOS
 #
-#    bash mac/install_schedule.sh              # 평일 18:30
+#    bash mac/install_schedule.sh              # 평일 22:00
 #    bash mac/install_schedule.sh 20 00        # 평일 20:00
 #    bash mac/install_schedule.sh --uninstall
 #
-#  launchd는 cron과 달리 맥이 잠들어 있어도 깨어난 직후 놓친 작업을 실행한다.
+#  세 가지를 등록한다.
+#    com.shortdashboard.daily     평일 지정 시각 1회 — 갱신 + 배포
+#    com.shortdashboard.keepalive 상주 — 30분마다 KRX 세션 연장/재로그인
+#    com.shortdashboard.agent     상주 — 대시보드 수동 갱신 버튼 수신
+#
+#  launchd는 cron과 달리 맥이 잠들어 있던 시간대의 작업을 깨어난 직후 실행한다.
+#  상주 작업(KeepAlive)은 죽으면 자동으로 다시 뜬다.
 # ============================================================
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LABEL="com.shortdashboard.daily"
-PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+UID_="$(id -u)"
+LA="$HOME/Library/LaunchAgents"
+
+DAILY="com.shortdashboard.daily"
+KEEP="com.shortdashboard.keepalive"
+AGENT="com.shortdashboard.agent"
+
+unload() {
+  launchctl bootout "gui/$UID_/$1" 2>/dev/null || true
+}
 
 if [[ "${1:-}" == "--uninstall" ]]; then
-  launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
-  rm -f "$PLIST"
-  echo "자동 실행 해제됨: $LABEL"
+  for l in "$DAILY" "$KEEP" "$AGENT"; do
+    unload "$l"
+    rm -f "$LA/$l.plist"
+  done
+  echo "자동 실행 해제됨: $DAILY, $KEEP, $AGENT"
   exit 0
 fi
 
-HOUR="${1:-18}"
-MIN="${2:-30}"
+HOUR="${1:-22}"
+MIN="${2:-0}"
+HOUR=$((10#$HOUR))
+MIN=$((10#$MIN))
 
-mkdir -p "$HOME/Library/LaunchAgents" "$ROOT/logs"
+mkdir -p "$LA" "$ROOT/logs"
 
-# 평일(월~금) = Weekday 1..5
-cat > "$PLIST" <<EOF
+# ---------------------------------------------------------------- 일일 갱신
+cat > "$LA/$DAILY.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>$LABEL</string>
+  <key>Label</key><string>$DAILY</string>
 
   <key>ProgramArguments</key>
   <array>
@@ -65,21 +83,82 @@ done)
 </plist>
 EOF
 
-launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
-launchctl bootstrap "gui/$(id -u)" "$PLIST"
+# ---------------------------------------------------------------- 세션 유지
+cat > "$LA/$KEEP.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$KEEP</string>
 
-echo
-echo "  자동 실행 등록 완료"
-echo "    라벨   : $LABEL"
-echo "    시각   : 평일 $(printf '%02d:%02d' "$HOUR" "$MIN")"
-echo "    plist  : $PLIST"
-echo "    로그   : $ROOT/logs/"
-echo
-echo "  즉시 실행:  launchctl kickstart -k gui/$(id -u)/$LABEL"
-echo "  상태 확인:  launchctl print gui/$(id -u)/$LABEL | head -20"
-echo "  해제     :  bash mac/install_schedule.sh --uninstall"
-echo
-echo "  참고: KRX 공매도는 크롬 로그인 세션이 필요합니다."
-echo "        mac/launch_chrome.sh 로 띄운 크롬을 로그인 상태로 두세요."
-echo "        세션이 없으면 나머지만 갱신되고 공매도는 직전 값이 유지됩니다."
-echo
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>$ROOT/mac/keepalive.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key><string>$ROOT</string>
+
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>60</integer>
+
+  <key>StandardOutPath</key><string>$ROOT/logs/keepalive.out.log</string>
+  <key>StandardErrorPath</key><string>$ROOT/logs/keepalive.err.log</string>
+  <key>ProcessType</key><string>Background</string>
+</dict>
+</plist>
+EOF
+
+# ---------------------------------------------------------------- 수동 갱신 에이전트
+cat > "$LA/$AGENT.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$AGENT</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>$ROOT/mac/agent.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key><string>$ROOT</string>
+
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>30</integer>
+
+  <key>StandardOutPath</key><string>$ROOT/logs/agent.out.log</string>
+  <key>StandardErrorPath</key><string>$ROOT/logs/agent.err.log</string>
+  <key>ProcessType</key><string>Background</string>
+</dict>
+</plist>
+EOF
+
+for l in "$DAILY" "$KEEP" "$AGENT"; do
+  unload "$l"
+  launchctl bootstrap "gui/$UID_" "$LA/$l.plist"
+done
+
+cat <<MSG
+
+  자동 실행 등록 완료
+    일일 갱신 : $DAILY — 평일 $(printf '%02d:%02d' "$HOUR" "$MIN")
+    세션 유지 : $KEEP — 상주, 30분 주기
+    수동 갱신 : $AGENT — 상주, http://127.0.0.1:8766
+    로그      : $ROOT/logs/
+
+  즉시 실행 :  launchctl kickstart -k gui/$UID_/$DAILY
+  상태 확인 :  launchctl print gui/$UID_/$KEEP | head -20
+  해제      :  bash mac/install_schedule.sh --uninstall
+
+  KRX 계정은 .env 의 KRX_ID / KRX_PW 로 자동 로그인합니다.
+  로그인이 연속 실패하면 계정 잠금을 피하려고 스스로 멈추고 텔레그램으로 알립니다.
+  그때는 확인 후 아래로 해제하세요.
+     .venv/bin/python scripts/krx_login.py --reset
+
+MSG

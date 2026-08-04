@@ -38,11 +38,23 @@ def _key() -> str:
 
 def fetch_day(market: str, day: dt.date, session: requests.Session,
               use_cache: bool = True) -> list[dict]:
-    """하루치 한 시장 데이터를 가져온다. 휴장일이면 빈 리스트."""
+    """하루치 한 시장 데이터를 가져온다. 휴장일이면 빈 리스트.
+
+    ⚠ 빈 응답은 캐시하지 않는다. 아직 게시되기 전(장 마감 직후·이른 시각)에
+    한 번 조회하면 빈 응답이 오는데, 이걸 캐시에 남기면 그 날짜는 영원히
+    빈 값으로 고정된다 — 실제로 7/30~8/3 시세가 이렇게 통째로 유실됐다.
+    휴장일이면 매번 한 번씩 더 물어보게 되지만, 그 비용이 훨씬 싸다.
+    """
     path = CACHE / f"{market}_{ymd(day)}.json.gz"
     if use_cache and path.exists():
-        with gzip.open(path, "rt", encoding="utf-8") as f:
-            return json.load(f)
+        try:
+            with gzip.open(path, "rt", encoding="utf-8") as f:
+                cached = json.load(f)
+        except (OSError, ValueError):
+            cached = None
+        if cached:
+            return cached
+        path.unlink(missing_ok=True)      # 비어 있던 캐시는 버리고 다시 받는다
 
     url = f"{BASE}/{MARKETS[market]}"
     for attempt in range(4):
@@ -61,8 +73,9 @@ def fetch_day(market: str, day: dt.date, session: requests.Session,
         return []
 
     slim = [{k: row.get(k, "") for k in KEEP} for row in rows]
-    with gzip.open(path, "wt", encoding="utf-8") as f:
-        json.dump(slim, f, ensure_ascii=False)
+    if slim:                              # 빈 응답은 남기지 않는다 (위 주석 참고)
+        with gzip.open(path, "wt", encoding="utf-8") as f:
+            json.dump(slim, f, ensure_ascii=False)
     return slim
 
 

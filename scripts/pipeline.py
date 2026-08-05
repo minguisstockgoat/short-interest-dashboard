@@ -177,9 +177,11 @@ def run_pipeline(a) -> int:
     if r.returncode != 0:
         log(f"pull 실패(계속 진행): {r.stderr.strip()[:200]}")
 
-    git("add", "docs")
+    # 반드시 docs 만 커밋한다. `add docs` 뒤 경로 없이 commit 하면 인덱스에 올라와
+    # 있던 다른 변경(특히 --autostash 가 복원한 로컬 수정)까지 함께 커밋돼,
+    # 검토 안 된 코드가 "데이터 갱신" 이름으로 푸시된다. 실제로 한 번 겪었다.
     git("commit", "-q", "-m",
-        f"데이터 갱신 {meta['asof']} (확정 {meta['knownDate']})")
+        f"데이터 갱신 {meta['asof']} (확정 {meta['knownDate']})", "--", "docs")
     r = git("push", "-q", "origin", "main", check=False)
     if r.returncode != 0:
         log(f"푸시 실패: {r.stderr.strip()[:200]}")

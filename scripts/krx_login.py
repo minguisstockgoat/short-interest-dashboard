@@ -104,13 +104,22 @@ def session_alive() -> bool:
 
 
 def open_login_window() -> bool:
-    """로그인 페이지를 띄운 전용 프로필 크롬을 준비한다.
+    """사람이 로그인할 KRX 화면을 띄운다.
 
-    크롬이 떠 있어도 창을 다 닫았으면 사람이 로그인할 화면이 없다 — 탭을 연다.
+    크롬이 떠 있어도 창을 다 닫았거나 빈 새 탭만 있으면 로그인할 화면이 없다.
+    KRX 탭이 실제로 있는지까지 보고, 없으면 로그인 페이지를 연다.
     """
-    if chrome.cdp_up():
-        return chrome.ensure_page()
-    return chrome.launch()
+    if not chrome.cdp_up():
+        return chrome.launch()
+
+    try:
+        pages = [t for t in chrome.targets() if t.get("type") == "page"]
+    except Exception:
+        pages = []
+    if any("krx.co.kr" in (p.get("url") or "") for p in pages):
+        log("KRX 탭이 이미 열려 있습니다 — 그 창에서 로그인해 주세요.")
+        return True
+    return chrome.new_tab()
 
 
 def ensure_login(*, force: bool = False) -> bool:

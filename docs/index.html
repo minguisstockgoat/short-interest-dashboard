@@ -446,14 +446,15 @@ fetch('dashboard_data.json').then(r=>r.json()).then(d=>{
     document.getElementById('banner').innerHTML =
       `<div class="banner"><b>공매도 잔고가 ${m.shortStaleDays}거래일 더 지연됐습니다</b> —
        확정일 ${F.date(m.knownDate)} 기준. KRX 수집이 실패하고 있을 수 있습니다
-       (정상은 기준일 대비 T+2). 맥미니에서
-       <code>python scripts/krx_login.py --status</code> 로 세션을 확인하세요.</div>`;
+       (정상은 기준일 대비 T+2). 맥에서
+       <code>krx_login.py --status</code> 로 세션을 확인하고, 만료됐으면 KRX 전용
+       크롬 창에서 네이버 로그인을 한 번 해주세요.</div>`;
   }
   if(!m.hasShort){
     document.getElementById('banner').innerHTML =
       `<div class="banner"><b>공매도·대차 데이터 미수집</b> — KRX 로그인 세션이 필요합니다.
-       크롬 로그인 후 <code>py scripts\\krx_short.py</code> → <code>py scripts\\estimate.py</code>
-       → <code>py scripts\\build_dashboard.py</code> 순으로 실행하면 잔고·증감·추정 컬럼이 채워집니다.</div>`;
+       KRX 전용 크롬 창에서 네이버 로그인 후
+       <code>python scripts/pipeline.py</code> 를 실행하면 잔고·증감·추정 컬럼이 채워집니다.</div>`;
     SORT={key:'mktcap', dir:-1};
   }
   document.getElementById('foot').innerHTML =
@@ -502,7 +503,7 @@ function applyStatus(s){
   const step = s.pipeline?.step;
   if(busy && step) bits.push(`진행: ${step}`);
   if(s.login?.locked)
-    bits.push(`<b>KRX 자동 로그인 잠금</b> — 맥미니에서 <code>krx_login.py --reset</code> 필요`);
+    bits.push(`<b>KRX 로그인 필요</b> — 맥의 KRX 전용 크롬 창에서 네이버 로그인 한 번`);
   else if(s.keepalive?.status && s.keepalive.status!=='ok')
     bits.push(`세션 상태: ${s.keepalive.status}`);
   if(!busy && s.pipeline?.state==='done' && s.pipeline?.asof)

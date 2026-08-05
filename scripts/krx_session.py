@@ -121,21 +121,23 @@ def check_session(s: requests.Session) -> tuple[bool, str]:
 
 
 def ensure_session(*, auto_login: bool = True) -> requests.Session:
-    """로그인된 세션을 돌려준다. 없으면 .env 계정으로 한 번 자동 로그인한다.
+    """로그인된 세션을 돌려준다. 없으면 krx_login 에 세션 확보를 한 번 위임한다.
 
-    krx_login 이 계정 잠금을 막는 시도 횟수 제한을 들고 있으므로, 여기서는
-    재시도 루프를 돌리지 않고 딱 한 번만 위임한다.
+    krx_login 은 크롬을 띄워 프로필 쿠키로 복구를 시도하고, 그래도 안 되면
+    사람에게 네이버 로그인을 요청한다. 여기서 재시도 루프를 돌리지 않는다.
     """
     try:
         return build_session()
     except (ChromeNotRunning, NotLoggedIn) as e:
         if not auto_login:
             raise
-        log(f"세션 없음({type(e).__name__}) — 자동 로그인 시도")
+        log(f"세션 없음({type(e).__name__}) — 세션 복구 시도")
 
     import krx_login
     if not krx_login.ensure_login():
-        raise NotLoggedIn("자동 로그인 실패 — krx_login.py --status 로 상태를 확인하세요.")
+        raise NotLoggedIn(
+            "세션 확보 실패 — 크롬 창에서 네이버로 KRX 로그인이 필요합니다. "
+            "(krx_login.py --status 로 상태 확인)")
     return build_session()
 
 

@@ -17,9 +17,9 @@ ROOT = Path(__file__).resolve().parent.parent
 LIVE = {k: v for k, v in {
     "KRX_API_KEY": os.environ.get("KRX_API_KEY"),
     "DART_API_KEY": os.environ.get("DART_API_KEY"),
-    "KRX_ID": os.environ.get("KRX_ID"),
-    "KRX_PW": os.environ.get("KRX_PW"),
+    "TELEGRAM_BOT_TOKEN": os.environ.get("TELEGRAM_BOT_TOKEN"),
 }.items() if v}
+# KRX 로그인은 네이버 SSO 라 계정을 .env 에 두지 않는다 — 검사할 값 자체가 없다.
 
 PATTERNS = [
     ("이메일", re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+")),

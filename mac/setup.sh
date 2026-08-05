@@ -42,13 +42,9 @@ if [[ ! -f .env ]]; then
 #   https://data.krx.co.kr → OPEN API 신청 후 발급받은 키
 KRX_API_KEY=
 
-# KRX 정보데이터시스템 로그인 계정 (공매도 잔고·거래량 수집에 필요)
-#   크롬을 띄워 이 계정으로 자동 로그인하고, 30분마다 세션을 연장한다.
-#   ⚠ KRX는 로그인 5회 실패 시 계정을 잠근다. 그래서 연속 2회 실패하면
-#     자동 시도를 멈추고 텔레그램으로 알린 뒤 사람을 기다린다.
-#   값에 # 이나 공백이 있으면 따옴표로 감싸세요:  KRX_PW='p@ss #1'
-KRX_ID=
-KRX_PW=
+# KRX 정보데이터시스템 로그인은 네이버 SSO 라서 .env 에 계정을 넣지 않는다.
+#   bash mac/launch_chrome.sh 로 전용 프로필 크롬을 띄우고 사람이 한 번 로그인하면,
+#   프로필에 쿠키가 남아 이후 수집이 그 세션을 빌려 쓴다(30분마다 자동 연장).
 
 # 텔레그램 알림 (선택이지만 강력 권장 — 무인 실행의 실패를 알아채는 유일한 통로)
 #   봇 생성: @BotFather → /newbot
@@ -84,13 +80,12 @@ fi
 
 echo
 echo "=== 다음 단계 ==="
-echo "  1) .env 에 KRX_API_KEY / KRX_ID / KRX_PW / TELEGRAM_* 입력"
+echo "  1) .env 에 KRX_API_KEY / TELEGRAM_* 입력"
 echo "  2) 데이터 이관:  Windows에서 만든 bootstrap 아카이브를 data/ 로 풀기"
 echo "     (없으면 처음부터 수집되지만 KRX 요청이 많아 시간이 걸립니다)"
 echo "  3) .venv/bin/python scripts/notify.py   → 텔레그램 알림 도착 확인"
-echo "  4) .venv/bin/python scripts/krx_login.py --dry-run"
-echo "                                 → 크롬이 뜨고 계정이 채워지는지 눈으로 확인"
-echo "  5) .venv/bin/python scripts/krx_login.py  → 실제 로그인 1회"
+echo "  4) bash mac/launch_chrome.sh    → 전용 크롬이 뜨면 네이버로 KRX 로그인 (사람이 1회)"
+echo "  5) .venv/bin/python scripts/krx_login.py --status  → 세션 유효 확인"
 echo "  6) bash mac/doctor.sh          → 환경 점검"
 echo "  7) bash mac/daily.sh           → 수동 1회 실행"
 echo "  8) bash mac/install_schedule.sh → 평일 22:00 자동 실행 + 세션유지 + 갱신버튼 등록"

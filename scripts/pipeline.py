@@ -3,6 +3,7 @@
 
   python scripts/pipeline.py                 # 전체 갱신
   python scripts/pipeline.py --deploy        # 갱신 후 docs/ 커밋·푸시
+  python scripts/pipeline.py --skip-open       # 시세 수집 건너뛰기 (OPEN API 키 없을 때)
   python scripts/pipeline.py --skip-krx-short  # KRX 공매도 건너뛰기
   python scripts/pipeline.py --days 14       # 시세·공매도 보강 기간
 
@@ -85,12 +86,19 @@ def run_pipeline(a) -> int:
     log(f"플랫폼 {sys.platform} / 파이썬 {sys.version.split()[0]} / 기간 {start}~{end}")
     set_status("running", step="1/8 시세", source=a.source)
 
+    # 1·2단계는 둘 다 KRX OPEN API(KRX_API_KEY)를 쓴다. 키가 없으면 함께 건너뛴다.
     log("1. KRX OPEN API 시세·상장주식수", head=True)
-    run([PY, SCRIPTS / "krx_open.py", "--start", start, "--end", end,
-         "--workers", "4"])
+    if a.skip_open:
+        log("건너뜀(--skip-open) — 기존 prices.csv 로 진행")
+    else:
+        run([PY, SCRIPTS / "krx_open.py", "--start", start, "--end", end,
+             "--workers", "4"])
 
     log("2. 종목 마스터·유니버스", head=True)
-    run([PY, SCRIPTS / "build_master.py", "--date", latest_price_date()])
+    if a.skip_open:
+        log("건너뜀(--skip-open) — 기존 master.csv / universe.csv 유지")
+    else:
+        run([PY, SCRIPTS / "build_master.py", "--date", latest_price_date()])
 
     if a.skip_float:
         log("3. 유동주식수 건너뜀", head=True)
@@ -199,6 +207,9 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=7, help="보강 기간(달력일)")
     ap.add_argument("--loan-days", type=int, default=210)
+    ap.add_argument("--skip-open", action="store_true",
+                    help="OPEN API 단계(시세·마스터) 생략 — 기존 CSV로 진행"
+                         " (기준일이 기존 prices.csv 마지막 날짜에 묶인다)")
     ap.add_argument("--skip-krx-short", action="store_true")
     ap.add_argument("--skip-float", action="store_true")
     ap.add_argument("--deploy", action="store_true", help="docs/ 커밋·푸시")

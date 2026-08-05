@@ -156,9 +156,9 @@ cat <<MSG
   상태 확인 :  launchctl print gui/$UID_/$KEEP | head -20
   해제      :  bash mac/install_schedule.sh --uninstall
 
-  KRX 계정은 .env 의 KRX_ID / KRX_PW 로 자동 로그인합니다.
-  로그인이 연속 실패하면 계정 잠금을 피하려고 스스로 멈추고 텔레그램으로 알립니다.
-  그때는 확인 후 아래로 해제하세요.
-     .venv/bin/python scripts/krx_login.py --reset
+  KRX 로그인은 네이버 SSO 라 사람이 한 번만 해주면 됩니다.
+     bash mac/launch_chrome.sh   → 열린 창에서 네이버로 KRX 로그인
+  이후 세션은 30분마다 자동 연장되고, 크롬을 껐다 켜도 프로필 쿠키로 복구됩니다.
+  그래도 만료되면 텔레그램으로 "로그인 한 번만" 알림이 오고, 로그인하면 자동 복귀합니다.
 
 MSG

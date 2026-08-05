@@ -71,31 +71,38 @@ powershell -ExecutionPolicy Bypass -File .\install_schedule.ps1 -Uninstall
 공매도 잔고·거래량이 KRX 로그인 세션을 요구하는데 Actions는 로그인할 수 없고,
 데이터센터 IP는 KRX가 차단한다. 그래서 상시 구동 머신의 스케줄러를 쓴다.
 
-## KRX 로그인 자동화
+## KRX 로그인 (네이버 SSO — 사람이 한 번, 이후 자동)
 
-공매도 단계만 로그인 세션이 필요하다. 계정은 `.env` 에서 읽는다.
+공매도 단계만 로그인 세션이 필요하다. KRX 로그인은 **네이버 계정 SSO** 라서
+코드가 아이디/비밀번호를 대신 넣지 않는다(네이버가 캡차·기기등록·2단계인증을
+걸기 때문에 자동 입력은 실패하거나 계정을 위험 상태로 만든다).
+그래서 이 저장소는 **KRX 비밀번호를 저장하지 않는다.**
 
+대신 전용 크롬 프로필(`.chrome-profile`)에 남는 쿠키를 세션의 근거로 쓴다.
+
+```bash
+bash mac/launch_chrome.sh          # 전용 프로필 크롬을 로그인 페이지로 띄운다
+                                   #   → 열린 창에서 네이버로 KRX 로그인 (사람이 1회)
+.venv/bin/python scripts/krx_login.py --status   # 세션 확인
 ```
-KRX_ID=아이디
-KRX_PW=비밀번호
+
+한 번 로그인하면 쿠키가 프로필 디스크에 남으므로 크롬을 껐다 켜도 유지된다.
+`krx_session.py` 가 CDP(`Network.getAllCookies`)로 `JSESSIONID` 를 포함한 쿠키를
+읽어 `requests.Session` 에 실어주고, 이후 수집은 순수 파이썬으로 돈다.
+
+`krx_keepalive.py` 가 30분마다 가벼운 조회를 던져 세션을 연장한다. 그래도
+만료되면 `krx_login.py` 가
+
+- 크롬이 꺼져 있으면 먼저 띄워 **프로필 쿠키로 세션 복구**를 시도하고,
+- 그래도 없으면 로그인 페이지를 띄운 뒤 텔레그램으로 "네이버 로그인 한 번만"
+  요청하고 조용히 기다린다. 무한 재시도는 하지 않는다.
+
+```bash
+.venv/bin/python scripts/krx_login.py --open     # 로그인 창만 띄우기
+.venv/bin/python scripts/krx_login.py --reset    # 대기 상태 수동 해제
 ```
 
-`krx_login.py` 가 전용 프로필(`.chrome-profile`)로 크롬을 띄우고 CDP로 로그인
-폼을 채운다. 로그인 폼이 JS로 그려지므로 셀렉터를 박아두지 않고 런타임에
-비밀번호 입력칸을 찾은 뒤 그 앞 입력칸을 아이디로 본다.
-
-> ⚠️ **KRX는 로그인 5회 실패 시 계정을 잠근다.** 그래서
-> - 한 번 호출에 로그인 시도는 **1회**,
-> - **연속 2회** 실패하면 스스로 잠금 모드로 들어가 더 시도하지 않고,
-> - 텔레그램으로 알린 뒤 사람이 풀어줄 때까지 기다린다.
->
-> ```bash
-> .venv/bin/python scripts/krx_login.py --status   # 세션·잠금 상태
-> .venv/bin/python scripts/krx_login.py --reset    # 확인 후 잠금 해제
-> ```
-
-`krx_keepalive.py` 가 30분마다 가벼운 조회를 던져 `JSESSIONID` 를 연장하고,
-끊겼으면 재로그인을 위임한다. 잠금 상태에서는 주기를 1시간으로 늘려 대기만 한다.
+사람이 로그인하면 다음 점검에서 자동으로 대기 상태가 풀린다.
 
 ## 알림 (텔레그램)
 
@@ -110,8 +117,8 @@ TELEGRAM_CHAT_ID=...        # getUpdates 의 chat.id
 
 | 사유 | 발송 조건 |
 |---|---|
-| 로그인 연속 실패 → 잠금 | 자동 시도를 멈췄을 때 (`--reset` 필요) |
-| 계정·크롬 문제 | `KRX_ID/PW` 없음, 크롬 기동 실패 |
+| 세션 만료 → 수동 로그인 요청 | 프로필 쿠키로도 복구 안 될 때 (네이버 로그인 필요) |
+| 크롬 문제 | 원격 디버깅 크롬 기동 실패 |
 | 공매도 지연 | 잔고가 정상(T+2)보다 더 밀렸을 때 |
 | 파이프라인 중단 | 예외·비정상 종료 |
 
@@ -229,7 +236,7 @@ scripts/
   notify.py          텔레그램 알림 (사유별 쿨다운)
   chrome.py          KRX 로그인용 크롬 기동·점검 (Win/mac 공통)
   cdp.py             얇은 CDP 클라이언트 (navigate/evaluate)
-  krx_login.py       .env 계정 자동 로그인 + 시도 횟수 제한·잠금
+  krx_login.py       세션 확보(프로필 쿠키 복구) + 수동 로그인 요청·대기
   krx_keepalive.py   30분 주기 세션 연장 상주 프로세스
   refresh_agent.py   대시보드 '수동 갱신' 버튼 수신 HTTP 에이전트
   krx_open.py        OPEN API 시세/상장주식수 수집

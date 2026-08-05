@@ -6,10 +6,11 @@
   python scripts/krx_keepalive.py --once          # 한 번만 점검하고 종료
 
 30분마다 가벼운 조회를 한 번 던져 JSESSIONID 를 연장한다. 세션이 끊겼으면
-krx_login 으로 재로그인을 위임한다(시도 횟수 제한은 그쪽이 들고 있다).
+krx_login 에 복구를 위임한다(크롬 기동·프로필 쿠키 복구는 그쪽이 들고 있다).
 
-잠금 상태에 들어가면 주기를 늘려 조용히 대기한다 — 사람이 --reset 하기 전까지
-KRX를 두드려봐야 계정 잠금 위험만 키우기 때문이다.
+복구가 안 돼 수동 로그인 대기로 넘어가면 주기를 늘려 조용히 기다린다 —
+사람이 크롬 창에서 네이버 로그인을 해줘야 풀리는 상황이라, 그 전까지 KRX를
+계속 두드려봐야 의미가 없기 때문이다. 로그인되면 다음 점검에서 자동 복귀한다.
 """
 from __future__ import annotations
 
@@ -20,7 +21,6 @@ import signal
 import sys
 import time
 
-import chrome
 import krx_login
 import notify
 from common import DATA, log
@@ -55,28 +55,29 @@ def tick() -> str:
     st = krx_login.load_state()
 
     if krx_login.session_alive():
-        if st.get("fail_streak"):
+        if st.get("fail_streak") or st.get("locked"):
             krx_login.record_ok(st)
         beat("ok", "세션 연장됨")
         return "ok"
 
-    if st.get("locked"):
-        beat("locked", st.get("last_reason") or "자동 로그인 잠금")
-        log("세션 없음 + 자동 로그인 잠금 — 재시도하지 않고 대기")
-        return "locked"
-
-    log("세션이 끊겼습니다 — 재로그인 시도")
-    if not chrome.cdp_up() and not chrome.launch():
-        beat("failed", "크롬 기동 실패")
-        return "failed"
-
+    # 대기 상태여도 먼저 ensure_login 에 넘긴다 — 크롬이 꺼져 있으면 session_alive()
+    # 는 쿠키가 멀쩡해도 False 라서, 띄워봐야 복구 가능 여부를 알 수 있다.
+    was_waiting = bool(st.get("locked"))
+    log("세션이 끊겼습니다 — 프로필 쿠키로 복구 시도")
     if krx_login.ensure_login():
-        beat("relogin", "재로그인 성공")
-        notify.send("✅ KRX 세션이 끊겨 자동 재로그인했습니다. 정상 동작 중입니다.",
-                    dedupe="krx-relogin", cooldown_h=24)
+        beat("relogin", "세션 복구됨")
+        if was_waiting:
+            notify.send("✅ KRX 세션이 복구됐습니다. 정상 동작 중입니다.",
+                        dedupe="krx-relogin", cooldown_h=24)
         return "relogin"
 
-    beat("failed", krx_login.load_state().get("last_reason") or "재로그인 실패")
+    st = krx_login.load_state()
+    if st.get("locked"):
+        beat("locked", st.get("last_reason") or "수동 로그인 대기")
+        log("네이버 수동 로그인 대기 — 더 시도하지 않고 기다립니다")
+        return "locked"
+
+    beat("failed", st.get("last_reason") or "세션 복구 실패")
     return "failed"
 
 

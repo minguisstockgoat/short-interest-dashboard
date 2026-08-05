@@ -57,7 +57,7 @@ TELEGRAM_CHAT_ID=
 #   127.0.0.1 로만 열 거라면 토큰 없이 두어도 된다.
 #   AGENT_HOST=0.0.0.0 으로 개방한다면 반드시 토큰을 설정하세요.
 # AGENT_HOST=127.0.0.1
-# AGENT_PORT=8766
+# AGENT_PORT=8776
 # AGENT_TOKEN=
 EOF
   chmod 600 .env

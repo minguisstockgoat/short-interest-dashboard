@@ -53,7 +53,7 @@ bash mac/install_schedule.sh --uninstall
 |---|---|---|
 | `com.shortdashboard.daily` | 평일 22:00 1회 | 갱신 + 커밋·푸시 |
 | `com.shortdashboard.keepalive` | 상주 | 30분마다 KRX 세션 연장·재로그인 |
-| `com.shortdashboard.agent` | 상주 | 대시보드 '수동 갱신' 버튼 수신 (127.0.0.1:8766) |
+| `com.shortdashboard.agent` | 상주 | 대시보드 '수동 갱신' 버튼 수신 (127.0.0.1:8776) |
 
 launchd는 cron과 달리 맥이 잠들어 있던 시간대의 작업을 깨어난 직후 실행하고,
 상주 작업은 죽으면 자동으로 다시 띄운다.
@@ -131,7 +131,7 @@ TELEGRAM_CHAT_ID=...        # getUpdates 의 chat.id
 GitHub Pages는 정적 사이트라 페이지가 직접 파이프라인을 돌릴 수 없기 때문이다.
 
 ```bash
-bash mac/agent.sh          # 127.0.0.1:8766 (install_schedule.sh 가 상주 등록)
+bash mac/agent.sh          # 127.0.0.1:8776 (install_schedule.sh 가 상주 등록)
 ```
 
 버튼을 누르면 파이프라인이 백그라운드로 시작되고 진행 로그가 페이지에 흐른다.

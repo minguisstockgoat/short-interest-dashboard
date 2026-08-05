@@ -149,7 +149,7 @@ cat <<MSG
   자동 실행 등록 완료
     일일 갱신 : $DAILY — 평일 $(printf '%02d:%02d' "$HOUR" "$MIN")
     세션 유지 : $KEEP — 상주, 30분 주기
-    수동 갱신 : $AGENT — 상주, http://127.0.0.1:8766
+    수동 갱신 : $AGENT — 상주, http://127.0.0.1:8776
     로그      : $ROOT/logs/
 
   즉시 실행 :  launchctl kickstart -k gui/$UID_/$DAILY

@@ -50,6 +50,12 @@ def _targets() -> list[dict]:
 def _pick_page() -> dict:
     pages = [t for t in _targets() if t.get("type") == "page"]
     if not pages:
+        # 창을 다 닫아도 맥에서는 크롬이 살아있다. 쿠키는 프로필에 그대로 있으므로
+        # 탭만 하나 열어주면 된다 — 로그인이 풀린 것으로 오판하지 않는다.
+        import chrome
+        if chrome.new_tab():
+            pages = [t for t in _targets() if t.get("type") == "page"]
+    if not pages:
         raise ChromeNotRunning("크롬에 열린 페이지 탭이 없습니다.")
     krx = [p for p in pages if "krx.co.kr" in (p.get("url") or "")]
     return (krx or pages)[0]

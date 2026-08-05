@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """대시보드 '수동 갱신' 버튼을 받는 로컬 에이전트.
 
-  python scripts/refresh_agent.py                 # 127.0.0.1:8766
+  python scripts/refresh_agent.py                 # 127.0.0.1:8776
   python scripts/refresh_agent.py --host 0.0.0.0  # 같은 네트워크에 개방
   python scripts/refresh_agent.py --port 9000
 
@@ -218,7 +218,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default="127.0.0.1",
                     help="기본 127.0.0.1 (같은 기기에서만). LAN 개방은 0.0.0.0")
-    ap.add_argument("--port", type=int, default=8766)
+    ap.add_argument("--port", type=int, default=8776)
     a = ap.parse_args()
 
     srv = ThreadingHTTPServer((a.host, a.port), Handler)

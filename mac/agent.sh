@@ -2,7 +2,7 @@
 # ============================================================
 #  대시보드 '수동 갱신' 버튼을 받는 로컬 에이전트 (launchd 진입점)
 #
-#    bash mac/agent.sh                    # 127.0.0.1:8766
+#    bash mac/agent.sh                    # 127.0.0.1:8776
 #    AGENT_HOST=0.0.0.0 bash mac/agent.sh # 같은 네트워크에 개방
 #
 #  브라우저는 https 페이지에서 http 로 나가는 요청을 막지만 localhost 는
@@ -30,4 +30,4 @@ fi
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 
 exec "$PY" scripts/refresh_agent.py \
-  --host "${AGENT_HOST:-127.0.0.1}" --port "${AGENT_PORT:-8766}" "$@"
+  --host "${AGENT_HOST:-127.0.0.1}" --port "${AGENT_PORT:-8776}" "$@"

@@ -473,7 +473,7 @@ fetch('dashboard_data.json').then(r=>r.json()).then(d=>{
    localhost 만은 예외라서, 에이전트가 도는 그 컴퓨터에서 열었을 때 살아난다.
    다른 주소(예: 터널로 https 노출)를 쓰려면 버튼을 우클릭해 등록한다. */
 const AGENT = {
-  url: localStorage.getItem('agentUrl') || 'http://127.0.0.1:8766',
+  url: localStorage.getItem('agentUrl') || 'http://127.0.0.1:8776',
   token: localStorage.getItem('agentToken') || '',
   on: false, timer: null,
 };

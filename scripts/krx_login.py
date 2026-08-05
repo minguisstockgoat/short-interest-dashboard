@@ -104,10 +104,12 @@ def session_alive() -> bool:
 
 
 def open_login_window() -> bool:
-    """로그인 페이지를 띄운 전용 프로필 크롬을 준비한다."""
+    """로그인 페이지를 띄운 전용 프로필 크롬을 준비한다.
+
+    크롬이 떠 있어도 창을 다 닫았으면 사람이 로그인할 화면이 없다 — 탭을 연다.
+    """
     if chrome.cdp_up():
-        log("크롬이 이미 떠 있습니다 (9222) — 열려 있는 창에서 로그인해 주세요.")
-        return True
+        return chrome.ensure_page()
     return chrome.launch()
 
 

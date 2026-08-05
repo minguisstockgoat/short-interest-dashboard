@@ -42,12 +42,15 @@ echo "  >> 열리는 창에서 KRX 로그인을 완료하세요."
 echo "  >> 맥미니는 이 창을 계속 열어두면 매일 자동 수집됩니다."
 echo
 
+# --restore-last-session 은 필수다. KRX 로그인 쿠키가 세션 쿠키라, 복원을 끄면
+# 크롬을 다시 띄울 때마다 네이버 로그인을 새로 해야 한다.
 nohup "$CHROME" \
   --remote-debugging-port=9222 \
   --remote-allow-origins='*' \
   --user-data-dir="$PROFILE" \
   --no-first-run \
   --no-default-browser-check \
+  --restore-last-session \
   "$LOGIN_URL" >/dev/null 2>&1 &
 
 sleep 3

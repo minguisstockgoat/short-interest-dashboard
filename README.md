@@ -52,7 +52,7 @@ bash mac/install_schedule.sh --uninstall
 | 라벨 | 성격 | 하는 일 |
 |---|---|---|
 | `com.shortdashboard.daily` | 평일 22:00 1회 | 갱신 + 커밋·푸시 |
-| `com.shortdashboard.keepalive` | 상주 | 30분마다 KRX 세션 연장·재로그인 |
+| `com.shortdashboard.keepalive` | 상주 | 20분마다 KRX 세션 연장·재로그인 |
 | `com.shortdashboard.agent` | 상주 | 대시보드 '수동 갱신' 버튼 수신 (127.0.0.1:8776) |
 
 launchd는 cron과 달리 맥이 잠들어 있던 시간대의 작업을 깨어난 직후 실행하고,
@@ -90,7 +90,7 @@ bash mac/launch_chrome.sh          # 전용 프로필 크롬을 로그인 페이
 `krx_session.py` 가 CDP(`Network.getAllCookies`)로 `JSESSIONID` 를 포함한 쿠키를
 읽어 `requests.Session` 에 실어주고, 이후 수집은 순수 파이썬으로 돈다.
 
-`krx_keepalive.py` 가 30분마다 가벼운 조회를 던져 세션을 연장한다. 그래도
+`krx_keepalive.py` 가 20분마다 가벼운 조회를 던져 세션을 연장한다. 그래도
 만료되면 `krx_login.py` 가
 
 - 크롬이 꺼져 있으면 먼저 띄워 **프로필 쿠키로 세션 복구**를 시도하고,
@@ -237,7 +237,7 @@ scripts/
   chrome.py          KRX 로그인용 크롬 기동·점검 (Win/mac 공통)
   cdp.py             얇은 CDP 클라이언트 (navigate/evaluate)
   krx_login.py       세션 확보(프로필 쿠키 복구) + 수동 로그인 요청·대기
-  krx_keepalive.py   30분 주기 세션 연장 상주 프로세스
+  krx_keepalive.py   20분 주기 세션 연장 상주 프로세스
   refresh_agent.py   대시보드 '수동 갱신' 버튼 수신 HTTP 에이전트
   krx_open.py        OPEN API 시세/상장주식수 수집
   build_master.py    종목기본정보 결합 → 보통주·시총 필터 → universe.csv

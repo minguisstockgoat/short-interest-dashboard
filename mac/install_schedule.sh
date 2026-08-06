@@ -8,7 +8,7 @@
 #
 #  세 가지를 등록한다.
 #    com.shortdashboard.daily     평일 지정 시각 1회 — 갱신 + 배포
-#    com.shortdashboard.keepalive 상주 — 30분마다 KRX 세션 연장/재로그인
+#    com.shortdashboard.keepalive 상주 — 20분마다 KRX 세션 연장(유휴 만료 30분)
 #    com.shortdashboard.agent     상주 — 대시보드 수동 갱신 버튼 수신
 #
 #  launchd는 cron과 달리 맥이 잠들어 있던 시간대의 작업을 깨어난 직후 실행한다.
@@ -148,7 +148,7 @@ cat <<MSG
 
   자동 실행 등록 완료
     일일 갱신 : $DAILY — 평일 $(printf '%02d:%02d' "$HOUR" "$MIN")
-    세션 유지 : $KEEP — 상주, 30분 주기
+    세션 유지 : $KEEP — 상주, 20분 주기
     수동 갱신 : $AGENT — 상주, http://127.0.0.1:8776
     로그      : $ROOT/logs/
 
@@ -158,7 +158,7 @@ cat <<MSG
 
   KRX 로그인은 네이버 SSO 라 사람이 한 번만 해주면 됩니다.
      bash mac/launch_chrome.sh   → 열린 창에서 네이버로 KRX 로그인
-  이후 세션은 30분마다 자동 연장되고, 크롬을 껐다 켜도 프로필 쿠키로 복구됩니다.
+  이후 세션은 20분마다 자동 연장되고, 크롬을 껐다 켜도 프로필 쿠키로 복구됩니다.
   그래도 만료되면 텔레그램으로 "로그인 한 번만" 알림이 오고, 로그인하면 자동 복귀합니다.
 
 MSG

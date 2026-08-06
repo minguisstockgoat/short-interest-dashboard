@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """KRX 로그인 세션 상시 유지 (맥미니 상주 프로세스).
 
-  python scripts/krx_keepalive.py                 # 30분 주기
+  python scripts/krx_keepalive.py                 # 20분 주기
   python scripts/krx_keepalive.py --interval 900  # 15분 주기
   python scripts/krx_keepalive.py --once          # 한 번만 점검하고 종료
 
-30분마다 가벼운 조회를 한 번 던져 JSESSIONID 를 연장한다. 세션이 끊겼으면
+주기마다 가벼운 조회를 한 번 던져 KRX 세션을 연장한다. 세션이 끊겼으면
 krx_login 에 복구를 위임한다(크롬 기동·프로필 쿠키 복구는 그쪽이 들고 있다).
 
 복구가 안 돼 수동 로그인 대기로 넘어가면 주기를 늘려 조용히 기다린다 —
@@ -26,8 +26,13 @@ import notify
 from common import DATA, log
 
 HEARTBEAT = DATA / ".keepalive.json"
-DEFAULT_INTERVAL = 1800          # 30분
-LOCKED_INTERVAL = 3600           # 잠금 중에는 1시간마다 상태만 확인
+
+# KRX 세션은 마지막 요청으로부터 30분이면 끊긴다. 주기를 30분으로 두면 만료
+# 경계와 정확히 겹쳐 매번 진다 — 실측으로 21:35 연장 → 22:06 점검에서 이미
+# 만료(31분)였다. 만료 시간보다 확실히 짧게 잡아 여유를 둔다.
+SESSION_TIMEOUT = 1800           # KRX 유휴 만료 (관측값, 30분)
+DEFAULT_INTERVAL = 1200          # 20분 — 만료까지 10분 여유
+LOCKED_INTERVAL = 3600           # 수동 로그인 대기 중에는 1시간마다 상태만 확인
 
 _stop = False
 
@@ -87,6 +92,12 @@ def main() -> int:
                     help=f"점검 주기(초), 기본 {DEFAULT_INTERVAL}")
     ap.add_argument("--once", action="store_true", help="한 번만 점검")
     a = ap.parse_args()
+
+    # 만료 시간과 같거나 길면 연장이 아니라 사후 확인이 된다 — 조용히 두지 않는다.
+    if not a.once and a.interval >= SESSION_TIMEOUT:
+        log(f"⚠ 주기 {a.interval}초가 세션 만료({SESSION_TIMEOUT}초) 이상입니다 — "
+            f"연장에 실패하고 만료를 뒤늦게 발견하게 됩니다. "
+            f"{DEFAULT_INTERVAL}초 이하를 권합니다.")
 
     signal.signal(signal.SIGTERM, _on_signal)
     signal.signal(signal.SIGINT, _on_signal)

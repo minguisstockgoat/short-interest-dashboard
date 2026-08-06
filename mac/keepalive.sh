@@ -2,11 +2,12 @@
 # ============================================================
 #  KRX 로그인 세션 상시 유지 (launchd 진입점)
 #
-#    bash mac/keepalive.sh              # 30분 주기로 상주
+#    bash mac/keepalive.sh              # 20분 주기로 상주
 #    bash mac/keepalive.sh --once       # 한 번만 점검
 #
-#  30분마다 세션을 연장하고, 끊겼으면 .env 계정으로 재로그인한다.
-#  연속 실패하면 스스로 멈추고 텔레그램으로 알린다(계정 잠금 방지).
+#  20분마다 세션을 연장한다. KRX 유휴 만료가 30분이라, 주기를 30분으로 두면
+#  만료 경계와 겹쳐 매번 놓친다. 끊겼으면 krx_login 에 복구를 맡기고,
+#  사람의 네이버 로그인이 필요하면 텔레그램으로 알린 뒤 조용히 기다린다.
 # ============================================================
 set -uo pipefail
 
@@ -29,4 +30,4 @@ fi
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 
-exec "$PY" scripts/krx_keepalive.py --interval "${KEEPALIVE_INTERVAL:-1800}" "$@"
+exec "$PY" scripts/krx_keepalive.py --interval "${KEEPALIVE_INTERVAL:-1200}" "$@"

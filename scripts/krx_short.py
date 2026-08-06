@@ -104,8 +104,12 @@ def fetch(session, kind: str, market: str, day: str, use_cache: bool = True):
                 time.sleep(1.0 * (attempt + 1))
                 continue
             rows = r.json().get("OutBlock_1") or []
-            with gzip.open(path, "wt", encoding="utf-8") as f:
-                json.dump(rows, f, ensure_ascii=False)
+            # 빈 응답은 캐시하지 않는다. 공매도 잔고는 T+2 공시라 "아직 안 나온
+            # 날"이 정상적으로 0건으로 오는데, 이걸 캐시에 박으면 나중에 공시돼도
+            # 캐시만 읽고 영원히 0건으로 남는다. 실제로 잔고가 사흘간 멈춰 있었다.
+            if rows:
+                with gzip.open(path, "wt", encoding="utf-8") as f:
+                    json.dump(rows, f, ensure_ascii=False)
             return rows
         except Exception:
             time.sleep(1.0 * (attempt + 1))

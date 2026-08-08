@@ -39,8 +39,8 @@ pipeline.py: 시세 → 유니버스 → 유동주식수 → 대차잔고 → �
 bash mac/setup.sh                    # 가상환경 + 의존성 + .env 생성
 tar -xzf bootstrap_data.tar.gz       # Windows에서 만든 데이터 이관 (재수집 회피)
 .venv/bin/python scripts/notify.py           # 텔레그램 알림 도착 확인
-.venv/bin/python scripts/krx_login.py --dry-run   # 로그인 폼 인식만 확인
-.venv/bin/python scripts/krx_login.py             # 실제 로그인 1회
+bash mac/launch_chrome.sh                    # 크롬 띄우고 네이버로 KRX 로그인 (사람이)
+.venv/bin/python scripts/krx_login.py --status    # 세션 확인
 bash mac/doctor.sh                   # 환경 점검
 bash mac/daily.sh                    # 수동 1회
 bash mac/install_schedule.sh         # 평일 22:00 등록 (시각 변경: 20 00)
@@ -52,7 +52,7 @@ bash mac/install_schedule.sh --uninstall
 | 라벨 | 성격 | 하는 일 |
 |---|---|---|
 | `com.shortdashboard.daily` | 평일 22:00 1회 | 갱신 + 커밋·푸시 |
-| `com.shortdashboard.keepalive` | 상주 | 20분마다 KRX 세션 연장·재로그인 |
+| `com.shortdashboard.keepalive` | 상주 | 5분마다 로그인 감지 → 감지 즉시 갱신·배포 |
 | `com.shortdashboard.agent` | 상주 | 대시보드 '수동 갱신' 버튼 수신 (127.0.0.1:8776) |
 
 launchd는 cron과 달리 맥이 잠들어 있던 시간대의 작업을 깨어난 직후 실행하고,
@@ -71,38 +71,46 @@ powershell -ExecutionPolicy Bypass -File .\install_schedule.ps1 -Uninstall
 공매도 잔고·거래량이 KRX 로그인 세션을 요구하는데 Actions는 로그인할 수 없고,
 데이터센터 IP는 KRX가 차단한다. 그래서 상시 구동 머신의 스케줄러를 쓴다.
 
-## KRX 로그인 (네이버 SSO — 사람이 한 번, 이후 자동)
+## KRX 로그인 — 하루 한 번, 로그인이 곧 갱신의 방아쇠
 
 공매도 단계만 로그인 세션이 필요하다. KRX 로그인은 **네이버 계정 SSO** 라서
-코드가 아이디/비밀번호를 대신 넣지 않는다(네이버가 캡차·기기등록·2단계인증을
-걸기 때문에 자동 입력은 실패하거나 계정을 위험 상태로 만든다).
-그래서 이 저장소는 **KRX 비밀번호를 저장하지 않는다.**
+코드가 아이디/비밀번호를 대신 넣지 않는다. 이 저장소는 **KRX 비밀번호를 저장하지 않는다.**
 
-대신 전용 크롬 프로필(`.chrome-profile`)에 남는 쿠키를 세션의 근거로 쓴다.
+### 세션은 붙들어둘 수 없다 (실측)
+
+KRX 세션은 **로그인 후 약 30분이면 활동과 무관하게 끊긴다.** 연장이 안 된다.
+
+```
+18:11 로그인 직후부터 2분 간격으로 인증 요청을 계속 보냄
+18:40 +28.1분  유효
+18:42 +30.1분  만료          ← 계속 요청했는데도 30분에 죽는다
+```
+
+유휴 타임아웃이 아니라 로그인 시각 기준 수명이다. 그래서
+
+- `requests` 로 아무리 조회해도 연장되지 않는다(위 실측).
+- 30분마다 자동 재로그인을 돌리는 방법은 쓰지 않는다 — 네이버 계정이 위험해진다.
+
+### 그래서: 사람이 하루 한 번 로그인하고, 그걸 감지해 바로 돌린다
 
 ```bash
 bash mac/launch_chrome.sh          # 전용 프로필 크롬을 로그인 페이지로 띄운다
-                                   #   → 열린 창에서 네이버로 KRX 로그인 (사람이 1회)
-.venv/bin/python scripts/krx_login.py --status   # 세션 확인
+                                   #   → 네이버로 로그인 (사람이 하는 유일한 일)
 ```
 
-한 번 로그인하면 쿠키가 프로필 디스크에 남으므로 크롬을 껐다 켜도 유지된다.
-`krx_session.py` 가 CDP(`Network.getAllCookies`)로 `JSESSIONID` 를 포함한 쿠키를
-읽어 `requests.Session` 에 실어주고, 이후 수집은 순수 파이썬으로 돈다.
+`krx_keepalive.py` 가 5분마다 세션만 들여다보다가, **세션이 살아났고 오늘 아직
+갱신이 안 돌았으면** 그 자리에서 `pipeline.py --deploy` 를 실행한다. 로그인하고
+자리를 떠도 5분 안에 수집·추정·배포까지 끝난다. 21시까지 로그인이 없으면
+텔레그램으로 한 번만 요청한다(하루 1회, 도배하지 않는다).
 
-`krx_keepalive.py` 가 20분마다 가벼운 조회를 던져 세션을 연장한다. 그래도
-만료되면 `krx_login.py` 가
-
-- 크롬이 꺼져 있으면 먼저 띄워 **프로필 쿠키로 세션 복구**를 시도하고,
-- 그래도 없으면 로그인 페이지를 띄운 뒤 텔레그램으로 "네이버 로그인 한 번만"
-  요청하고 조용히 기다린다. 무한 재시도는 하지 않는다.
+수집은 CDP(`Network.getAllCookies`)로 `JSESSIONID` 를 포함한 쿠키를 빌려
+`requests.Session` 에 실어 돌린다 → `scripts/krx_session.py`.
 
 ```bash
-.venv/bin/python scripts/krx_login.py --open     # 로그인 창만 띄우기
-.venv/bin/python scripts/krx_login.py --reset    # 대기 상태 수동 해제
+.venv/bin/python scripts/krx_login.py --status    # 세션 상태
+.venv/bin/python scripts/krx_login.py --open      # 로그인 창 띄우기
+.venv/bin/python scripts/krx_keepalive.py --once  # 감시 1회 (로그인돼 있으면 갱신 실행)
 ```
-
-사람이 로그인하면 다음 점검에서 자동으로 대기 상태가 풀린다.
 
 ## 알림 (텔레그램)
 
@@ -117,7 +125,7 @@ TELEGRAM_CHAT_ID=...        # getUpdates 의 chat.id
 
 | 사유 | 발송 조건 |
 |---|---|
-| 세션 만료 → 수동 로그인 요청 | 프로필 쿠키로도 복구 안 될 때 (네이버 로그인 필요) |
+| 오늘 갱신 미완 | 21시까지 로그인이 없을 때 (하루 1회) |
 | 크롬 문제 | 원격 디버깅 크롬 기동 실패 |
 | 공매도 지연 | 잔고가 정상(T+2)보다 더 밀렸을 때 |
 | 파이프라인 중단 | 예외·비정상 종료 |
@@ -237,7 +245,7 @@ scripts/
   chrome.py          KRX 로그인용 크롬 기동·점검 (Win/mac 공통)
   cdp.py             얇은 CDP 클라이언트 (navigate/evaluate)
   krx_login.py       세션 확보(프로필 쿠키 복구) + 수동 로그인 요청·대기
-  krx_keepalive.py   20분 주기 세션 연장 상주 프로세스
+  krx_keepalive.py   5분 주기 로그인 감시 — 로그인 감지 시 파이프라인 실행
   refresh_agent.py   대시보드 '수동 갱신' 버튼 수신 HTTP 에이전트
   krx_open.py        OPEN API 시세/상장주식수 수집
   build_master.py    종목기본정보 결합 → 보통주·시총 필터 → universe.csv
@@ -257,7 +265,7 @@ mac/                 macOS 실행 래퍼
   setup.sh           최초 셋업 (venv·의존성·.env)
   launch_chrome.sh   KRX 로그인용 크롬 (원격 디버깅 9222)
   daily.sh           launchd 진입점 — 일일 갱신
-  keepalive.sh       launchd 진입점 — 세션 유지 상주
+  keepalive.sh       launchd 진입점 — 로그인 감시 상주
   agent.sh           launchd 진입점 — 수동 갱신 에이전트 상주
   install_schedule.sh launchd 3종 등록/해제
   doctor.sh          환경 점검

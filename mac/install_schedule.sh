@@ -8,7 +8,7 @@
 #
 #  세 가지를 등록한다.
 #    com.shortdashboard.daily     평일 지정 시각 1회 — 갱신 + 배포
-#    com.shortdashboard.keepalive 상주 — 20분마다 KRX 세션 연장(유휴 만료 30분)
+#    com.shortdashboard.keepalive 상주 — 5분마다 로그인 감지, 감지 즉시 갱신 실행
 #    com.shortdashboard.agent     상주 — 대시보드 수동 갱신 버튼 수신
 #
 #  launchd는 cron과 달리 맥이 잠들어 있던 시간대의 작업을 깨어난 직후 실행한다.
@@ -148,7 +148,7 @@ cat <<MSG
 
   자동 실행 등록 완료
     일일 갱신 : $DAILY — 평일 $(printf '%02d:%02d' "$HOUR" "$MIN")
-    세션 유지 : $KEEP — 상주, 20분 주기
+    로그인 감시 : $KEEP — 상주, 5분 주기 (로그인하면 그 자리에서 갱신)
     수동 갱신 : $AGENT — 상주, http://127.0.0.1:8776
     로그      : $ROOT/logs/
 

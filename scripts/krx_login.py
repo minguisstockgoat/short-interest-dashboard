@@ -93,7 +93,12 @@ def record_fail(s: dict, reason: str) -> bool:
 
 # ---------------------------------------------------------------- 세션
 def session_alive() -> bool:
-    """현재 크롬 쿠키로 로그인 상태인지."""
+    """현재 크롬 쿠키로 로그인 상태인지.
+
+    이 호출은 확인일 뿐 연장이 아니다. KRX 세션은 로그인 시각 기준 약 30분이면
+    활동과 무관하게 끊긴다(2분 간격으로 인증 요청을 계속 보내며 실측했다).
+    그래서 세션을 붙들어두려는 시도는 하지 않는다 — krx_keepalive 참고.
+    """
     import krx_session
     try:
         s = krx_session.build_session(verify=False)
@@ -116,9 +121,19 @@ def open_login_window() -> bool:
         pages = [t for t in chrome.targets() if t.get("type") == "page"]
     except Exception:
         pages = []
+
+    # KRX 탭이 있어도 로그인 화면이 떠 있다는 보장은 없다(세션 연장으로 데이터
+    # 페이지에 가 있는 게 보통이다). 사람이 로그인하려고 부른 명령이므로,
+    # 있으면 그 탭을 로그인 페이지로 보내고 없으면 새로 연다.
     if any("krx.co.kr" in (p.get("url") or "") for p in pages):
-        log("KRX 탭이 이미 열려 있습니다 — 그 창에서 로그인해 주세요.")
-        return True
+        from cdp import open_page
+        try:
+            with open_page("krx.co.kr") as page:
+                page.navigate(chrome.LOGIN_URL, settle=2.0)
+            log("KRX 탭을 로그인 페이지로 이동했습니다.")
+            return True
+        except Exception as e:
+            log(f"기존 탭 이동 실패({type(e).__name__}) — 새 탭을 엽니다.")
     return chrome.new_tab()
 
 

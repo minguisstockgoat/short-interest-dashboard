@@ -1,16 +1,23 @@
 # -*- coding: utf-8 -*-
-"""KRX 로그인 세션 상시 유지 (맥미니 상주 프로세스).
+"""KRX 로그인 감시 — 사람이 로그인하면 그 순간 갱신을 돌린다 (상주 프로세스).
 
-  python scripts/krx_keepalive.py                 # 20분 주기
-  python scripts/krx_keepalive.py --interval 900  # 15분 주기
-  python scripts/krx_keepalive.py --once          # 한 번만 점검하고 종료
+  python scripts/krx_keepalive.py            # 5분 주기 감시
+  python scripts/krx_keepalive.py --once     # 한 번만 점검하고 종료
+  python scripts/krx_keepalive.py --no-run   # 감지만 하고 파이프라인은 안 돌림
 
-주기마다 가벼운 조회를 한 번 던져 KRX 세션을 연장한다. 세션이 끊겼으면
-krx_login 에 복구를 위임한다(크롬 기동·프로필 쿠키 복구는 그쪽이 들고 있다).
+원래는 세션을 계속 연장해 무인 운영하려 했지만, KRX 세션은 **로그인 후 약 30분**
+이면 활동과 무관하게 끊긴다. 2분 간격으로 인증 요청을 계속 보내면서 재봤는데도
+정확히 30분에 만료됐다. 즉 연장으로는 버틸 수 없고, 30분마다 자동 재로그인을
+시도하는 건 네이버 계정을 위험하게 만든다.
 
-복구가 안 돼 수동 로그인 대기로 넘어가면 주기를 늘려 조용히 기다린다 —
-사람이 크롬 창에서 네이버 로그인을 해줘야 풀리는 상황이라, 그 전까지 KRX를
-계속 두드려봐야 의미가 없기 때문이다. 로그인되면 다음 점검에서 자동 복귀한다.
+그래서 방향을 바꿨다 — **하루 한 번 사람이 로그인하고, 그 로그인이 갱신의 방아쇠**가
+된다. 이 프로세스는 5분마다 세션만 들여다보다가,
+
+  · 세션이 살아났고 (= 방금 로그인했고)
+  · 오늘 아직 갱신이 안 돌았으면
+
+곧바로 파이프라인을 돌린다. 사람은 크롬 창에서 로그인만 하면 되고, 나머지는
+알아서 끝난다. 정해진 시각까지 로그인이 없으면 한 번만 알린다.
 """
 from __future__ import annotations
 
@@ -18,21 +25,23 @@ import argparse
 import datetime as dt
 import json
 import signal
+import subprocess
 import sys
 import time
+from pathlib import Path
 
 import krx_login
 import notify
-from common import DATA, log
+from common import DATA, ROOT, log
 
 HEARTBEAT = DATA / ".keepalive.json"
+WATCH_STATE = DATA / ".watch_state.json"
 
-# KRX 세션은 마지막 요청으로부터 30분이면 끊긴다. 주기를 30분으로 두면 만료
-# 경계와 정확히 겹쳐 매번 진다 — 실측으로 21:35 연장 → 22:06 점검에서 이미
-# 만료(31분)였다. 만료 시간보다 확실히 짧게 잡아 여유를 둔다.
-SESSION_TIMEOUT = 1800           # KRX 유휴 만료 (관측값, 30분)
-DEFAULT_INTERVAL = 1200          # 20분 — 만료까지 10분 여유
-LOCKED_INTERVAL = 3600           # 수동 로그인 대기 중에는 1시간마다 상태만 확인
+# KRX 세션 수명(관측값). 로그인 시각 기준이며 활동해도 늘지 않는다.
+SESSION_LIFETIME = 1800          # 약 30분
+DEFAULT_INTERVAL = 300           # 5분 — 로그인을 빨리 알아채는 게 유일한 목적
+
+REMIND_HOUR = 21                 # 이 시각까지 갱신이 없으면 로그인 요청 알림
 
 _stop = False
 
@@ -55,75 +64,125 @@ def beat(status: str, detail: str = "") -> None:
         pass
 
 
-def tick() -> str:
-    """한 번 점검한다. 'ok' | 'relogin' | 'locked' | 'failed'"""
+def load_watch() -> dict:
+    if WATCH_STATE.exists():
+        try:
+            return json.loads(WATCH_STATE.read_text(encoding="utf-8"))
+        except (ValueError, OSError):
+            pass
+    return {"last_run_date": None, "last_run_at": None, "last_exit": None}
+
+
+def save_watch(s: dict) -> None:
+    try:
+        WATCH_STATE.write_text(json.dumps(s, ensure_ascii=False, indent=1),
+                               encoding="utf-8")
+    except OSError:
+        pass
+
+
+def ran_today(w: dict) -> bool:
+    return w.get("last_run_date") == dt.date.today().strftime("%Y%m%d")
+
+
+def run_pipeline() -> int:
+    """로그인이 감지된 김에 갱신을 끝까지 돌린다.
+
+    세션 수명이 30분이라 지체할 여유가 없다 — 감지 즉시 시작한다.
+    """
+    py = sys.executable
+    cmd = [py, str(Path(ROOT) / "scripts" / "pipeline.py"),
+           "--days", "10", "--deploy", "--source", "login"]
+    log("로그인 감지 — 갱신을 시작합니다: " + " ".join(cmd[-6:]))
+    p = subprocess.run(cmd, cwd=str(ROOT))
+    log(f"갱신 종료 (exit={p.returncode})")
+    return p.returncode
+
+
+def tick(*, allow_run: bool = True) -> str:
+    """한 번 점검한다. 'ran' | 'ok' | 'waiting' | 'failed'"""
     st = krx_login.load_state()
+    w = load_watch()
 
     if krx_login.session_alive():
         if st.get("fail_streak") or st.get("locked"):
             krx_login.record_ok(st)
-        beat("ok", "세션 연장됨")
+
+        if ran_today(w):
+            beat("ok", "세션 유효 · 오늘 갱신 완료")
+            return "ok"
+
+        if not allow_run:
+            beat("ok", "세션 유효 · 갱신 대기(--no-run)")
+            return "ok"
+
+        code = run_pipeline()
+        w.update(last_run_date=dt.date.today().strftime("%Y%m%d"),
+                 last_run_at=dt.datetime.now().isoformat(timespec="seconds"),
+                 last_exit=code)
+        save_watch(w)
+        if code == 0:
+            beat("ok", "로그인 감지 → 갱신 완료")
+            notify.send("✅ 로그인 감지 — 공매도 갱신을 끝냈습니다. "
+                        "오늘은 더 로그인하지 않으셔도 됩니다.",
+                        dedupe="daily-update-done", cooldown_h=12)
+            return "ran"
+        beat("failed", f"갱신 실패 (exit={code})")
+        notify.send(f"❌ 로그인은 됐는데 갱신이 실패했습니다 (exit={code}).\n"
+                    f"logs/pipeline_*.log 를 확인해 주세요.",
+                    dedupe="daily-update-failed", cooldown_h=6)
+        return "failed"
+
+    # 세션 없음 — 크롬이 꺼져 있으면 띄워보고(프로필 쿠키로 살아날 수 있다),
+    # 그래도 없으면 사람의 로그인을 기다린다. 여기서 로그인을 시도하지는 않는다.
+    if krx_login.ensure_login():
+        beat("ok", "세션 복구됨")
         return "ok"
 
-    # 대기 상태여도 먼저 ensure_login 에 넘긴다 — 크롬이 꺼져 있으면 session_alive()
-    # 는 쿠키가 멀쩡해도 False 라서, 띄워봐야 복구 가능 여부를 알 수 있다.
-    was_waiting = bool(st.get("locked"))
-    log("세션이 끊겼습니다 — 프로필 쿠키로 복구 시도")
-    if krx_login.ensure_login():
-        beat("relogin", "세션 복구됨")
-        if was_waiting:
-            notify.send("✅ KRX 세션이 복구됐습니다. 정상 동작 중입니다.",
-                        dedupe="krx-relogin", cooldown_h=24)
-        return "relogin"
+    if not ran_today(w) and dt.datetime.now().hour >= REMIND_HOUR:
+        notify.send(
+            "🔑 오늘 공매도 갱신이 아직입니다 — KRX 전용 크롬 창에서 "
+            "네이버 로그인 한 번만 해주세요.\n"
+            "로그인하면 5분 안에 자동으로 갱신이 돌고 배포까지 끝납니다.",
+            dedupe="daily-login-request", cooldown_h=20)
 
-    st = krx_login.load_state()
-    if st.get("locked"):
-        beat("locked", st.get("last_reason") or "수동 로그인 대기")
-        log("네이버 수동 로그인 대기 — 더 시도하지 않고 기다립니다")
-        return "locked"
-
-    beat("failed", st.get("last_reason") or "세션 복구 실패")
-    return "failed"
+    beat("waiting", "로그인 대기 중" + ("" if not ran_today(w) else " · 오늘 갱신은 완료"))
+    return "waiting"
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(
+        description="KRX 로그인 감시 — 로그인하면 그 자리에서 갱신을 돌린다")
     ap.add_argument("--interval", type=int, default=DEFAULT_INTERVAL,
                     help=f"점검 주기(초), 기본 {DEFAULT_INTERVAL}")
     ap.add_argument("--once", action="store_true", help="한 번만 점검")
+    ap.add_argument("--no-run", action="store_true",
+                    help="로그인을 감지해도 파이프라인은 돌리지 않는다")
     a = ap.parse_args()
-
-    # 만료 시간과 같거나 길면 연장이 아니라 사후 확인이 된다 — 조용히 두지 않는다.
-    if not a.once and a.interval >= SESSION_TIMEOUT:
-        log(f"⚠ 주기 {a.interval}초가 세션 만료({SESSION_TIMEOUT}초) 이상입니다 — "
-            f"연장에 실패하고 만료를 뒤늦게 발견하게 됩니다. "
-            f"{DEFAULT_INTERVAL}초 이하를 권합니다.")
 
     signal.signal(signal.SIGTERM, _on_signal)
     signal.signal(signal.SIGINT, _on_signal)
 
     if a.once:
-        r = tick()
+        r = tick(allow_run=not a.no_run)
         print(f"결과: {r}")
-        return 0 if r in ("ok", "relogin") else 1
+        return 0 if r in ("ok", "ran") else 1
 
-    log(f"KRX 세션 유지 시작 — {a.interval}초 주기")
+    log(f"KRX 로그인 감시 시작 — {a.interval}초 주기 "
+        f"(세션 수명 {SESSION_LIFETIME // 60}분, 연장 불가)")
     while not _stop:
         try:
-            result = tick()
+            tick(allow_run=not a.no_run)
         except Exception as e:                   # 상주 프로세스는 어떤 예외로도 죽지 않는다
             log(f"점검 중 예외: {type(e).__name__} {e}")
             beat("error", f"{type(e).__name__}: {e}")
-            result = "failed"
 
-        wait = LOCKED_INTERVAL if result == "locked" else a.interval
-        # 종료 신호에 빠르게 반응하도록 잘게 나눠 잔다
         slept = 0.0
-        while slept < wait and not _stop:
-            time.sleep(min(5.0, wait - slept))
+        while slept < a.interval and not _stop:   # 종료 신호에 빠르게 반응
+            time.sleep(min(5.0, a.interval - slept))
             slept += 5.0
 
-    log("KRX 세션 유지 종료")
+    log("KRX 로그인 감시 종료")
     return 0
 
 

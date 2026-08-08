@@ -19,8 +19,19 @@ from common import ROOT, log
 CDP_HOST = "http://127.0.0.1:9222"
 KRX_ORIGIN = "https://data.krx.co.kr"
 JSON_URL = f"{KRX_ORIGIN}/comm/bldAttendant/getJsonData.cmd"
-UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-      "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+# 쿠키를 빌려온 그 브라우저와 같은 UA로 보낸다. 예전에는 윈도우 크롬 UA가 박혀
+# 있었는데, 맥에서 돌리면 "맥 크롬이 만든 세션을 윈도우 크롬이 쓰는" 꼴이 된다.
+UA_FALLBACK = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+               "(KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36")
+
+
+def browser_ua() -> str:
+    """실행 중인 크롬의 실제 User-Agent. 못 읽으면 폴백."""
+    try:
+        with urllib.request.urlopen(f"{CDP_HOST}/json/version", timeout=5) as r:
+            return json.load(r).get("User-Agent") or UA_FALLBACK
+    except Exception:
+        return UA_FALLBACK
 
 
 class ChromeNotRunning(RuntimeError):
@@ -88,7 +99,7 @@ def build_session(verify: bool = True) -> requests.Session:
 
     s = requests.Session()
     s.headers.update({
-        "User-Agent": UA,
+        "User-Agent": browser_ua(),
         "Accept": "application/json, text/javascript, */*; q=0.01",
         "Accept-Language": "ko-KR,ko;q=0.9",
         "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",

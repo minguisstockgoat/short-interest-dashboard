@@ -16,7 +16,7 @@
 powershell -ExecutionPolicy Bypass -File .\serve.ps1     # → http://127.0.0.1:8765/
 
 # 데이터 갱신 (KRX 공매도만 로그인 필요)
-powershell -ExecutionPolicy Bypass -File .\launch_chrome.ps1   # 크롬 띄우고 직접 로그인
+powershell -ExecutionPolicy Bypass -File .\launch_chrome.ps1   # 크롬만 띄운다 (로그인은 자동)
 powershell -ExecutionPolicy Bypass -File .\update.ps1
 
 # KRX가 차단 중이거나 로그인이 안 됐으면 나머지만 갱신
@@ -39,7 +39,7 @@ pipeline.py: 시세 → 유니버스 → 유동주식수 → 대차잔고 → �
 bash mac/setup.sh                    # 가상환경 + 의존성 + .env 생성
 tar -xzf bootstrap_data.tar.gz       # Windows에서 만든 데이터 이관 (재수집 회피)
 .venv/bin/python scripts/notify.py           # 텔레그램 알림 도착 확인
-bash mac/launch_chrome.sh                    # 크롬 띄우고 네이버로 KRX 로그인 (사람이)
+.venv/bin/python scripts/krx_login.py             # KRX 자체 계정으로 로그인 (자동)
 .venv/bin/python scripts/krx_login.py --status    # 세션 확인
 bash mac/doctor.sh                   # 환경 점검
 bash mac/daily.sh                    # 수동 1회
@@ -52,7 +52,7 @@ bash mac/install_schedule.sh --uninstall
 | 라벨 | 성격 | 하는 일 |
 |---|---|---|
 | `com.shortdashboard.daily` | 평일 22:00 1회 | 갱신 + 커밋·푸시 |
-| `com.shortdashboard.keepalive` | 상주 | 5분마다 로그인 감지 → 감지 즉시 갱신·배포 |
+| `com.shortdashboard.keepalive` | 상주 | 5분마다 세션 점검 → 없으면 자동 로그인 후 갱신·배포 |
 | `com.shortdashboard.agent` | 상주 | 대시보드 '수동 갱신' 버튼 수신 (127.0.0.1:8776) |
 
 launchd는 cron과 달리 맥이 잠들어 있던 시간대의 작업을 깨어난 직후 실행하고,
@@ -71,14 +71,28 @@ powershell -ExecutionPolicy Bypass -File .\install_schedule.ps1 -Uninstall
 공매도 잔고·거래량이 KRX 로그인 세션을 요구하는데 Actions는 로그인할 수 없고,
 데이터센터 IP는 KRX가 차단한다. 그래서 상시 구동 머신의 스케줄러를 쓴다.
 
-## KRX 로그인 — 하루 한 번, 로그인이 곧 갱신의 방아쇠
+## KRX 로그인 — KRX 자체 계정으로 자동 로그인
 
-공매도 단계만 로그인 세션이 필요하다. KRX 로그인은 **네이버 계정 SSO** 라서
-코드가 아이디/비밀번호를 대신 넣지 않는다. 이 저장소는 **KRX 비밀번호를 저장하지 않는다.**
+공매도 단계만 로그인 세션이 필요하다. **KRX 자체 계정**(아이디/비밀번호)으로
+코드가 직접 로그인한다. 자격증명은 중앙 볼트에 둔다.
 
-### 세션은 붙들어둘 수 없다 (실측)
+```
+~/.config/secrets/keys.env
+  KRX_ID=아이디
+  KRX_PW="비밀번호"          # 특수문자가 있으니 따옴표로 감싼다
+```
 
-KRX 세션은 **로그인 후 약 30분이면 활동과 무관하게 끊긴다.** 연장이 안 된다.
+### 네이버 SSO 로는 자동화가 안 된다 (실측)
+
+KRX 는 네이버 OAuth 를 `auth_type=reauthenticate` 로 호출한다.
+
+```
+nid.naver.com/oauth2.0/authorize?auth_type=reauthenticate&scope=...
+```
+
+프로필에 네이버 로그인 쿠키(`NID_AUT`, `NID_SES`)가 멀쩡히 살아 있어도 **"세션
+무시하고 비밀번호를 다시 받으라"** 는 뜻이라, SSO 버튼을 눌러도 매번 사람이
+네이버 비밀번호를 쳐야 한다. 세션이 30분 만에 죽는 것도 같은 정책이다.
 
 ```
 18:11 로그인 직후부터 2분 간격으로 인증 요청을 계속 보냄
@@ -86,30 +100,35 @@ KRX 세션은 **로그인 후 약 30분이면 활동과 무관하게 끊긴다.*
 18:42 +30.1분  만료          ← 계속 요청했는데도 30분에 죽는다
 ```
 
-유휴 타임아웃이 아니라 로그인 시각 기준 수명이다. 그래서
+네이버 비밀번호를 코드가 대신 치는 방법은 쓰지 않는다 — 캡차·기기등록이 걸리고
+계정이 위험해진다. 대신 KRX 로그인 화면 안내대로 **마이페이지 > 정보수정에서
+KRX 자체 비밀번호를 신규 설정**하면 네이버를 아예 거치지 않는다. 자체 로그인 폼은
+캡차 없는 단순 POST 라 코드가 채워 넣을 수 있다.
 
-- `requests` 로 아무리 조회해도 연장되지 않는다(위 실측).
-- 30분마다 자동 재로그인을 돌리는 방법은 쓰지 않는다 — 네이버 계정이 위험해진다.
+### 동작
 
-### 그래서: 사람이 하루 한 번 로그인하고, 그걸 감지해 바로 돌린다
+`krx_login.native_login()` 이 로그인 화면(iframe `login.jsp`)의 `mbrId`/`pw` 를
+채우고 제출한다. 서버에 이전 세션이 남아 있으면 **"이미 로그인된 계정입니다.
+기존 계정을 로그아웃하고 새로 로그인하시겠습니까?"** 확인창이 뜨는데, 우리
+계정의 낡은 세션이므로 '확인'을 눌러 밀어낸다. 여기까지 13초쯤 걸린다.
 
-```bash
-bash mac/launch_chrome.sh          # 전용 프로필 크롬을 로그인 페이지로 띄운다
-                                   #   → 네이버로 로그인 (사람이 하는 유일한 일)
-```
+`krx_keepalive.py` 는 5분마다 세션을 보다가 없으면 스스로 로그인하고, 오늘 아직
+갱신이 안 돌았으면 그 자리에서 `pipeline.py --deploy` 를 실행한다. **사람이 할
+일은 없다.**
 
-`krx_keepalive.py` 가 5분마다 세션만 들여다보다가, **세션이 살아났고 오늘 아직
-갱신이 안 돌았으면** 그 자리에서 `pipeline.py --deploy` 를 실행한다. 로그인하고
-자리를 떠도 5분 안에 수집·추정·배포까지 끝난다. 21시까지 로그인이 없으면
-텔레그램으로 한 번만 요청한다(하루 1회, 도배하지 않는다).
+자동 로그인이 연속 2회 실패하면 더 시도하지 않고 끈다(`native_disabled`).
+KRX 도 실패가 쌓이면 계정을 잠그기 때문에, 틀린 비밀번호로 매일 두드리지 않는다.
+이때만 텔레그램으로 알린다 — 자격증명을 고치고 `--reset` 으로 다시 켠다.
 
 수집은 CDP(`Network.getAllCookies`)로 `JSESSIONID` 를 포함한 쿠키를 빌려
 `requests.Session` 에 실어 돌린다 → `scripts/krx_session.py`.
 
 ```bash
-.venv/bin/python scripts/krx_login.py --status    # 세션 상태
-.venv/bin/python scripts/krx_login.py --open      # 로그인 창 띄우기
-.venv/bin/python scripts/krx_keepalive.py --once  # 감시 1회 (로그인돼 있으면 갱신 실행)
+.venv/bin/python scripts/krx_login.py --status    # 세션·자동 로그인 상태
+.venv/bin/python scripts/krx_login.py             # 필요하면 지금 로그인
+.venv/bin/python scripts/krx_login.py --open      # 로그인 창 띄우기 (수동 로그인용)
+.venv/bin/python scripts/krx_login.py --reset     # 실패 누적 해제 + 자동 로그인 재활성
+.venv/bin/python scripts/krx_keepalive.py --once  # 감시 1회
 ```
 
 ## 알림 (텔레그램)
@@ -125,7 +144,7 @@ TELEGRAM_CHAT_ID=...        # getUpdates 의 chat.id
 
 | 사유 | 발송 조건 |
 |---|---|
-| 오늘 갱신 미완 | 21시까지 로그인이 없을 때 (하루 1회) |
+| 오늘 갱신 미완 | 21시까지 자동 로그인이 안 될 때 (하루 1회) |
 | 크롬 문제 | 원격 디버깅 크롬 기동 실패 |
 | 공매도 지연 | 잔고가 정상(T+2)보다 더 밀렸을 때 |
 | 파이프라인 중단 | 예외·비정상 종료 |
@@ -199,8 +218,8 @@ Est(D) = Bal(D-2) + Σ_{t∈{D-1, D}} [ α·ΔLoan(t) + β·ShortVol(t) ]
 | 종가·거래량·시가총액·**상장주식수** | KRX OPEN API (`data-dbg.krx.co.kr`) | `KRX_API_KEY` |
 | 종목구분(보통주/우선주/스팩) | KRX OPEN API 종목기본정보 | 유니버스 필터 |
 | **유동주식수·유동비율** | FnGuide Company Guide Snapshot | 7일 캐시 |
-| **공매도 순보유잔고** | KRX 정보데이터시스템 `MDCSTAT30501` | 로그인 필요, T+2 |
-| **공매도 거래량** | KRX 정보데이터시스템 `MDCSTAT30101` | 로그인 필요 |
+| **공매도 순보유잔고** | KRX 정보데이터시스템 `MDCSTAT30501` | 로그인 필요(자동), T+2 |
+| **공매도 거래량** | KRX 정보데이터시스템 `MDCSTAT30101` | 로그인 필요(자동) |
 | **대차잔고(종목별)** | 금융투자협회 FreeSIS `STATSCU0100000140` | **로그인 불필요**, D일까지 |
 
 ### 대차잔고 (KOFIA FreeSIS)
@@ -222,8 +241,8 @@ POST https://freesis.kofia.or.kr/meta/getMetaDataList.do
 ## KRX 접근 방식
 
 `data.krx.co.kr`은 로그인 세션이 있어야 데이터를 준다(미로그인 시 `LOGOUT` 응답).
-비밀번호를 코드가 다루지 않도록, **사용자가 크롬에서 직접 로그인**하고
-스크립트는 CDP(원격 디버깅 9222)로 세션 쿠키만 빌려 쓴다 → `scripts/krx_session.py`.
+`krx_login.py` 가 KRX 자체 계정으로 크롬에서 로그인하고, 수집은 CDP(원격 디버깅
+9222)로 그 세션 쿠키만 빌려 쓴다 → `scripts/krx_session.py`.
 
 > ⚠️ **레이트리밋 주의.** KRX는 짧은 시간에 요청이 몰리면 엣지단에서 IP를 차단하며
 > (전 도메인 403, OPEN API 포함) 수 시간 지속된다. `krx_short.py`는 전역 0.7초 간격,
@@ -244,8 +263,8 @@ scripts/
   notify.py          텔레그램 알림 (사유별 쿨다운)
   chrome.py          KRX 로그인용 크롬 기동·점검 (Win/mac 공통)
   cdp.py             얇은 CDP 클라이언트 (navigate/evaluate)
-  krx_login.py       세션 확보(프로필 쿠키 복구) + 수동 로그인 요청·대기
-  krx_keepalive.py   5분 주기 로그인 감시 — 로그인 감지 시 파이프라인 실행
+  krx_login.py       세션 확보 — KRX 자체 계정 자동 로그인
+  krx_keepalive.py   5분 주기 세션 감시 — 없으면 자동 로그인 후 파이프라인 실행
   refresh_agent.py   대시보드 '수동 갱신' 버튼 수신 HTTP 에이전트
   krx_open.py        OPEN API 시세/상장주식수 수집
   build_master.py    종목기본정보 결합 → 보통주·시총 필터 → universe.csv

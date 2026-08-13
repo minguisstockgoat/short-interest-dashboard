@@ -5,19 +5,18 @@
   python scripts/krx_keepalive.py --once     # 한 번만 점검하고 종료
   python scripts/krx_keepalive.py --no-run   # 감지만 하고 파이프라인은 안 돌림
 
-원래는 세션을 계속 연장해 무인 운영하려 했지만, KRX 세션은 **로그인 후 약 30분**
-이면 활동과 무관하게 끊긴다. 2분 간격으로 인증 요청을 계속 보내면서 재봤는데도
-정확히 30분에 만료됐다. 즉 연장으로는 버틸 수 없고, 30분마다 자동 재로그인을
-시도하는 건 네이버 계정을 위험하게 만든다.
+KRX 세션은 **로그인 후 약 30분**이면 활동과 무관하게 끊긴다. 2분 간격으로 인증
+요청을 계속 보내면서 재봤는데도 정확히 30분에 만료됐다 — 연장으로는 못 버틴다.
 
-그래서 방향을 바꿨다 — **하루 한 번 사람이 로그인하고, 그 로그인이 갱신의 방아쇠**가
-된다. 이 프로세스는 5분마다 세션만 들여다보다가,
+예전에는 네이버 SSO 뿐이라 사람이 하루 한 번 로그인해줘야 했지만, 지금은 KRX
+자체 계정으로 코드가 직접 로그인한다(krx_login.native_login). 그래서 이 프로세스는
+5분마다 세션을 보다가,
 
-  · 세션이 살아났고 (= 방금 로그인했고)
+  · 세션이 없으면 스스로 로그인하고
   · 오늘 아직 갱신이 안 돌았으면
 
-곧바로 파이프라인을 돌린다. 사람은 크롬 창에서 로그인만 하면 되고, 나머지는
-알아서 끝난다. 정해진 시각까지 로그인이 없으면 한 번만 알린다.
+곧바로 파이프라인을 돌린다. 사람이 할 일은 없다. 자동 로그인이 연속 실패해서
+꺼진 경우에만(자격증명 문제) 정해진 시각 이후 한 번 알린다.
 """
 from __future__ import annotations
 
@@ -104,7 +103,12 @@ def tick(*, allow_run: bool = True) -> str:
     st = krx_login.load_state()
     w = load_watch()
 
-    if krx_login.session_alive():
+    # 세션이 없으면 스스로 로그인한다(KRX 자체 계정). 크롬이 꺼져 있으면 띄워서
+    # 프로필 쿠키로 살아나는지도 ensure_login 안에서 본다. 여기서 성공하면
+    # 다음 tick 을 기다리지 않고 이번 차례에 바로 갱신까지 간다.
+    alive = krx_login.session_alive() or krx_login.ensure_login()
+
+    if alive:
         if st.get("fail_streak") or st.get("locked"):
             krx_login.record_ok(st)
 
@@ -133,17 +137,13 @@ def tick(*, allow_run: bool = True) -> str:
                     dedupe="daily-update-failed", cooldown_h=6)
         return "failed"
 
-    # 세션 없음 — 크롬이 꺼져 있으면 띄워보고(프로필 쿠키로 살아날 수 있다),
-    # 그래도 없으면 사람의 로그인을 기다린다. 여기서 로그인을 시도하지는 않는다.
-    if krx_login.ensure_login():
-        beat("ok", "세션 복구됨")
-        return "ok"
-
+    # 자동 로그인까지 실패했다 = 자격증명이 틀렸거나 KRX 쪽 문제다.
     if not ran_today(w) and dt.datetime.now().hour >= REMIND_HOUR:
         notify.send(
-            "🔑 오늘 공매도 갱신이 아직입니다 — KRX 전용 크롬 창에서 "
-            "네이버 로그인 한 번만 해주세요.\n"
-            "로그인하면 5분 안에 자동으로 갱신이 돌고 배포까지 끝납니다.",
+            "🔑 오늘 공매도 갱신이 아직입니다 — 자동 로그인이 안 되고 있습니다.\n"
+            "볼트의 KRX_ID / KRX_PW 를 확인하거나, KRX 전용 크롬 창에서 "
+            "직접 로그인해 주세요.\n"
+            "로그인되면 5분 안에 자동으로 갱신이 돌고 배포까지 끝납니다.",
             dedupe="daily-login-request", cooldown_h=20)
 
     beat("waiting", "로그인 대기 중" + ("" if not ran_today(w) else " · 오늘 갱신은 완료"))

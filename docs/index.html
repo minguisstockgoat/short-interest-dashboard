@@ -461,7 +461,7 @@ fetch('dashboard_data.json').then(r=>r.json()).then(d=>{
   document.getElementById('meta').innerHTML =
     `기준일 <b>${F.date(m.asof)}</b> · 공매도 확정일 <b>${m.knownDate?F.date(m.knownDate):'–'}</b>
      ${m.shortStaleDays ? `<span class="stale" title="잔고는 T+2 공시가 정상입니다. 그보다 더 밀려 있습니다.">${m.shortStaleDays}거래일 지연</span>` : ''}
-     · 유니버스 <b>${m.universe}</b>종목 (시총 ${(m.minMktcap/1e12).toFixed(0)}조 이상 개별 보통주)
+     · 유니버스 <b>${m.universe}</b>종목 (시총 ${m.minMktcap>=1e12 ? (m.minMktcap/1e12).toFixed(0)+'조' : (m.minMktcap/1e8).toLocaleString()+'억'} 이상 개별 보통주)
      · 생성 ${m.generatedAt}`;
   if(m.shortStaleDays){
     document.getElementById('banner').innerHTML =

@@ -53,8 +53,10 @@ def log(msg: str) -> None:
     print(f"[{dt.datetime.now():%H:%M:%S}] {msg}", flush=True)
 
 
-# 대시보드 유니버스 기본값: 시가총액 1조원 이상
-MIN_MKTCAP = 1_000_000_000_000
+# 대시보드 유니버스 기본값: 시가총액 5,000억원 이상
+# (2026-08-20 1조 → 5천억 확대. KRX 공매도·시세는 시장 단위 일괄 수집이라 요청 수가 늘지 않고,
+#  종목별로 붙는 건 KOFIA 대차잔고와 FnGuide 유동주식수뿐이다.)
+MIN_MKTCAP = 500_000_000_000
 
 
 def load_universe(min_mktcap: int = MIN_MKTCAP):

@@ -41,6 +41,11 @@ def fetch_info(bas_dd: str) -> pd.DataFrame:
         "LIST_DD": "list_date"})
 
 
+def _cap_label(v: float) -> str:
+    """1조 미만이면 억 단위로 적는다 (5,000억 같은 기준을 '0조'로 찍지 않도록)."""
+    return f"{v/1e12:.0f}조" if v >= 1e12 else f"{v/1e8:,.0f}억"
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", required=True, help="기준일 YYYYMMDD (최근 거래일)")
@@ -50,7 +55,10 @@ def main() -> None:
     info = fetch_info(a.date)
     master = pd.read_csv(MASTER_CSV, dtype={"code": str})
     master["code"] = master["code"].astype(str).str.zfill(6)
-    m = master.merge(info, on="code", how="left")
+    # 이 스크립트가 붙였던 열이 master.csv에 이미 남아 있으면 merge가 _x/_y로 갈라진다.
+    # (krx_open.py를 다시 돌리지 않고 이 단계만 재실행하는 경우)
+    dupes = [c for c in info.columns if c != "code" and c in master.columns]
+    m = master.drop(columns=dupes).merge(info, on="code", how="left")
 
     m["is_common"] = (
         (m["secu_group"] == "주권")
@@ -65,7 +73,7 @@ def main() -> None:
     uni.to_csv(UNIVERSE_CSV, index=False, encoding="utf-8-sig")
 
     log(f"전체 {len(m):,}종목 → 보통주 {int(m['is_common'].sum()):,}종목 "
-        f"→ 시총 {a.min_mktcap/1e12:.0f}조 이상 유니버스 {len(uni):,}종목")
+        f"→ 시총 {_cap_label(a.min_mktcap)} 이상 유니버스 {len(uni):,}종목")
     log(f"  KOSPI {int((uni['market'] == 'KOSPI').sum())} / "
         f"KOSDAQ {int((uni['market'] == 'KOSDAQ').sum())}")
     log(f"저장: {UNIVERSE_CSV}")

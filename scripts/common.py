@@ -30,6 +30,40 @@ LOAN_BAL_CSV = DATA / "loan_balance.csv"      # 대차 잔고 (KRX)
 DASHBOARD_JSON = WEB / "dashboard_data.json"
 
 
+# --------------------------------------------------------------- 담당 머신
+# 이 대시보드는 맥·윈도우 두 대에 같은 저장소가 깔려 있어 양쪽이 번갈아 갱신·푸시해
+# 왔다. 그 탓에 다른 PC 를 켤 때마다 KRX 로그인 요청이 뜨고 커밋도 중복된다.
+# 그래서 '갱신을 담당하는 한 대'만 돌도록 막는다.
+#
+# 지정은 각 머신의 .env (git 미추적) 에 둔다 — 저장소가 공개라 호스트명을
+# 커밋하지 않기 위해서다:
+#     PRIMARY_HOST=<hostname>
+# 값이 없거나 다른 머신이면 갱신 계열 스크립트는 아무것도 하지 않고 끝난다.
+# 담당을 옮기려면 그 머신 .env 에 자기 hostname 을 적으면 된다.
+
+def hostname() -> str:
+    """비교용으로 정규화한 이 머신의 호스트명(도메인 제거·소문자)."""
+    import socket
+    return socket.gethostname().split(".")[0].strip().lower()
+
+
+def is_primary() -> bool:
+    import os
+    want = os.environ.get("PRIMARY_HOST", "").split(".")[0].strip().lower()
+    return bool(want) and want == hostname()
+
+
+def require_primary(what: str) -> bool:
+    """담당 머신이 아니면 사유를 찍고 False. 호출부는 조용히 끝내면 된다."""
+    if is_primary():
+        return True
+    import os
+    want = os.environ.get("PRIMARY_HOST", "").strip()
+    log(f"{what}: 이 머신({hostname()})은 갱신 담당이 아니라 건너뜁니다."
+        + (f" 담당={want}" if want else " (.env 에 PRIMARY_HOST 없음)"))
+    return False
+
+
 def ymd(d: dt.date) -> str:
     return d.strftime("%Y%m%d")
 

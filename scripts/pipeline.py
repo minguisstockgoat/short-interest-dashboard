@@ -219,6 +219,11 @@ def main() -> int:
                     help="실행 출처 (schedule/manual) — 상태 표시에만 쓰인다")
     a = ap.parse_args()
 
+    # 갱신 담당 머신이 아니면 아무것도 하지 않는다(common 이 .env 도 같이 읽는다).
+    from common import require_primary
+    if not require_primary("데이터 갱신"):
+        return 0
+
     try:
         code = run_pipeline(a)
     except SystemExit as e:                      # run(check=True) 실패

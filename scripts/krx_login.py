@@ -35,7 +35,7 @@ import time
 
 import chrome
 import notify
-from common import DATA, log
+from common import DATA, log, require_primary
 
 STATE = DATA / ".krx_login_state.json"
 MAX_FAIL_STREAK = 2          # 이만큼 연속 실패하면 '수동 로그인 대기' 로 물러난다
@@ -289,6 +289,11 @@ def ensure_login(*, force: bool = False) -> bool:
     보통은 KRX 자체 계정으로 스스로 로그인해서 True 를 돌려준다. 자격증명이
     없거나 자동 로그인이 연속 실패한 경우에만 사람을 부른다.
     """
+    # 담당 머신이 아니면 로그인 자체를 시도하지 않는다. 다른 PC 를 켤 때마다
+    # KRX 로그인 요청이 뜨던 원인이 여기였다.
+    if not require_primary("KRX 로그인"):
+        return False
+
     st = load_state()
 
     if not force and session_alive():
@@ -352,6 +357,9 @@ def main() -> int:
     ap.add_argument("--reset", action="store_true",
                     help="실패 누적·대기 상태 해제 (자동 로그인도 다시 켠다)")
     a = ap.parse_args()
+
+    if not (a.status or a.reset) and not require_primary("KRX 로그인"):
+        return 1
 
     if a.reset:
         s = load_state()

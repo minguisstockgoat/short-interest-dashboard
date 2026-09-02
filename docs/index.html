@@ -99,6 +99,9 @@ input[type=search]{min-width:210px}
 }
 .seg button[aria-pressed=true]{background:var(--s1); color:#fff; font-weight:600}
 .spacer{flex:1}
+/* 표에서 뺀 지표(DTC·시총·유동비율·종가…)도 정렬로는 계속 닿을 수 있어야 한다. */
+.sortwrap{display:inline-flex; align-items:center; gap:6px; color:var(--ink2); font-size:12.5px}
+.dirbtn{padding:6px 9px; font-size:11px; line-height:1}
 .count{color:var(--muted); font-size:12.5px; font-variant-numeric:tabular-nums}
 
 .layout{display:grid; grid-template-columns:minmax(0,1fr) 470px; gap:18px; align-items:start}
@@ -108,7 +111,7 @@ input[type=search]{min-width:210px}
 .tablewrap{overflow:auto; max-height:74vh}
 table{border-collapse:separate; border-spacing:0; width:100%; font-variant-numeric:tabular-nums}
 th,td{padding:7px 10px; white-space:nowrap; text-align:right}
-th:nth-child(-n+3),td:nth-child(-n+3){text-align:left}
+th:nth-child(-n+2),td:nth-child(-n+2){text-align:left}
 thead th{
   position:sticky; top:0; z-index:2; background:var(--surface);
   border-bottom:1px solid var(--axis); color:var(--ink2);
@@ -123,7 +126,7 @@ td{font-size:13px; color:var(--ink)}
 .rank{color:var(--muted); font-size:12px}
 .nm{font-weight:560}
 .cd{color:var(--muted); font-size:11.5px; margin-left:5px}
-.tag{font-size:10.5px; padding:1px 6px; border-radius:4px; border:1px solid var(--border); color:var(--ink2)}
+.tag{font-size:10.5px; padding:1px 6px; border-radius:4px; border:1px solid var(--border); color:var(--ink2); margin-left:7px}
 .up{color:var(--up)} .down{color:var(--down)} .zero{color:var(--muted)}
 .est{color:var(--est)}
 .bar{position:relative}
@@ -132,6 +135,15 @@ td{font-size:13px; color:var(--ink)}
   height:15px; background:var(--s1soft); border-radius:0 3px 3px 0; z-index:0;
 }
 .bar>span{position:relative; z-index:1}
+
+/* 표 안 스파크라인 — 최근 60거래일 잔고비율. 세로 축은 행마다 자기 min~max 로
+   재조정한다. 종목 간 절대 수준은 옆의 '잔고비율' 열이 이미 말해주므로,
+   이 칸은 모양(늘고 있나 줄고 있나)만 보여주는 게 정보 밀도가 높다. */
+th.sp,td.sp{text-align:left; width:104px}
+td.sp{padding:3px 10px}
+thead th[data-nosort]{cursor:default}
+.spark{width:86px; height:22px; display:block}
+.spark .base{stroke:var(--grid); stroke-width:1}
 
 /* 상세 */
 .detail{position:sticky; top:14px; padding:16px}
@@ -186,6 +198,10 @@ svg{display:block; width:100%; overflow:visible}
     <button data-v="list" aria-pressed="true">상장주식수 대비</button>
     <button data-v="float" aria-pressed="false">유동주식수 대비</button>
   </div>
+  <label class="sortwrap">정렬
+    <select id="sortsel"></select>
+    <button class="btn dirbtn" id="sortdir" title="정렬 방향">▼</button>
+  </label>
   <div class="spacer"></div>
   <div class="count" id="count"></div>
 </div>
@@ -228,10 +244,14 @@ const F = {
 let DATA=null, VIEW=[], SEL=null, DENOM='list';
 let SORT={key:'ratioList', dir:-1};
 
+/* 표는 훑는 곳이고 우측 패널은 파는 곳이다. 그래서 표에는 '지금 얼마이고
+   어느 쪽으로 가고 있나'만 남긴다. 뺀 열(DTC·상장/유동주식수·유동비율·종가·
+   시총·α·β·R²)은 전부 종목을 클릭하면 패널에 그대로 나오므로 정보 손실은 없다.
+   대신 정렬로는 계속 닿아야 해서 SORTABLE 목록에 남겨뒀다. */
 const COLS = () => ([
   {k:'_rank', t:'#',        f:(r,i)=>`<span class="rank">${i+1}</span>`, nosort:true},
-  {k:'name',  t:'종목',      f:r=>`<span class="nm">${r.name}</span><span class="cd">${r.code}</span>`},
-  {k:'market',t:'시장',      f:r=>`<span class="tag">${r.market}</span>`},
+  {k:'name',  t:'종목',
+   f:r=>`<span class="nm">${r.name}</span><span class="cd">${r.code}</span><span class="tag">${r.market}</span>`},
   {k:DENOM==='list'?'ratioList':'ratioFloat', t:DENOM==='list'?'잔고비율(상장)':'잔고비율(유동)',
    f:(r)=>{const v=DENOM==='list'?r.ratioList:r.ratioFloat; const m=VIEW.__max||1;
            return `<div class="bar"><i style="width:${v?Math.max(2,v/m*100):0}%"></i><span>${F.pct(v)}</span></div>`;}},
@@ -239,26 +259,85 @@ const COLS = () => ([
    f:r=>`<span class="est">${F.pct(DENOM==='list'?r.estRatioList:r.estRatioFloat)}</span>`},
   {k:'balQty',t:'공매도잔고', f:r=>F.sh(r.balQty)},
   {k:'balEst',t:'추정잔고(D)',f:r=>`<span class="est">${F.sh(r.balEst)}</span>`},
+  {k:'_spark',t:'60일 추이', f:r=>spark(r), nosort:true, cls:'sp'},
   {k:'chg1',  t:'1일 증감',  f:r=>F.sgn(r.chg1)},
   {k:'chg5',  t:'5일 증감',  f:r=>F.sgn(r.chg5)},
   {k:'chg20', t:'20일 증감', f:r=>F.sgn(r.chg20)},
-  {k:'dtc',   t:'DTC(일)',   f:r=>F.num(r.dtc,1)},
-  {k:'listShares', t:'상장주식수', f:r=>F.sh(r.listShares)},
-  {k:'floatShares',t:'유동주식수', f:r=>F.sh(r.floatShares)},
-  {k:'floatRatio', t:'유동비율',  f:r=>F.pct(r.floatRatio,1)},
-  {k:'close', t:'종가',      f:r=>F.int(r.close)},
-  {k:'mktcap',t:'시총',      f:r=>F.jo(r.mktcap)},
-  {k:'alpha', t:'α',        f:r=>F.num(r.alpha,3)},
-  {k:'beta',  t:'β',        f:r=>F.num(r.beta,3)},
-  {k:'r2',    t:'R²',       f:r=>F.num(r.r2,2)},
 ]);
 
+/* 정렬 전용 — 표에 열이 없는 지표도 여기서 고를 수 있다. */
+const SORTABLE = () => ([
+  [DENOM==='list'?'ratioList':'ratioFloat', DENOM==='list'?'잔고비율(상장)':'잔고비율(유동)'],
+  [DENOM==='list'?'estRatioList':'estRatioFloat', '추정비율(D)'],
+  ['balQty','공매도잔고'], ['balEst','추정잔고(D)'],
+  ['chg1','1일 증감'], ['chg5','5일 증감'], ['chg20','20일 증감'],
+  ['dtc','DTC(일)'], ['mktcap','시총'], ['close','종가'],
+  ['floatRatio','유동비율'], ['listShares','상장주식수'], ['floatShares','유동주식수'],
+  ['r2','추정 R²'], ['name','종목명'],
+]);
+
+/* ---- 표 안 스파크라인 (최근 60거래일 잔고비율) -------------------------------
+   확정 구간은 실선, 미공시 추정 구간은 점선으로 이어 그린다. est 배열이 마지막
+   확정점에서 시작하므로 두 선은 끊기지 않고 붙는다. 검색어를 칠 때마다 render()
+   가 466행을 다시 그리는 구조라, 만들어 둔 SVG 문자열은 종목·분모별로 캐시한다. */
+const SPARK = {};
+function spark(r){
+  const key = r.code + '|' + DENOM;
+  if(key in SPARK) return SPARK[key];
+  const s = DATA.series[r.code];
+  const rk = DENOM==='list' ? 'ratioList' : 'ratioFloat';
+  if(!s || !s[rk]) return SPARK[key] = '';
+
+  const N=60, W=86, H=22, PAD=2.5;
+  const conf = s[rk].slice(-N);
+  const est  = s.est ? expand(s, rk).slice(-N) : new Array(conf.length).fill(null);
+  const all  = conf.concat(est).filter(v=>v!=null);
+  if(all.length < 2) return SPARK[key] = '';
+
+  let lo=Math.min(...all), hi=Math.max(...all);
+  if(hi===lo){ lo-=0.5; hi+=0.5; }
+  const n=conf.length;
+  const X=i=> n<2 ? W/2 : i/(n-1)*W;
+  const Y=v=> PAD + (H-2*PAD) - (v-lo)/(hi-lo)*(H-2*PAD);
+  const path = a => {
+    let d='', pen=false;
+    a.forEach((v,i)=>{ if(v==null){ pen=false; return; }
+      d += (pen?'L':'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1) + ' '; pen=true; });
+    return d.trim();
+  };
+
+  const c = DENOM==='list' ? 'var(--s1)' : 'var(--s2)';
+  const dConf=path(conf), dEst=path(est);
+  const first=all[0], last=all[all.length-1];
+  return SPARK[key] =
+    `<svg class="spark" viewBox="0 0 ${W} ${H}" role="img"`
+    + ` aria-label="60거래일 ${first.toFixed(1)}% → ${last.toFixed(1)}%">`
+    + `<path d="${dConf}" fill="none" stroke="${c}" stroke-width="1.4"`
+    + ` stroke-linejoin="round" stroke-linecap="round"/>`
+    + (dEst ? `<path d="${dEst}" fill="none" stroke="var(--est)" stroke-width="1.4"`
+              + ` stroke-dasharray="2.5 2" stroke-linecap="round"/>` : '')
+    + `</svg>`;
+}
+
+/* 헤더 클릭과 정렬 셀렉트는 같은 SORT 를 본다. 한쪽을 바꾸면 다른 쪽이 따라온다. */
+function sortUI(){
+  const sel=document.getElementById('sortsel');
+  const opts=SORTABLE();
+  const known=opts.some(([k])=>k===SORT.key);
+  sel.innerHTML = opts.map(([k,t])=>
+      `<option value="${k}"${k===SORT.key?' selected':''}>${t}</option>`).join('')
+    + (known ? '' : `<option value="${SORT.key}" selected>${SORT.key}</option>`);
+  document.getElementById('sortdir').textContent = SORT.dir<0 ? '▼' : '▲';
+}
+
 function head(){
+  sortUI();
   const cols=COLS();
   document.getElementById('hrow').innerHTML = cols.map(c=>{
     const on = SORT.key===c.k;
     const ar = on ? `<span class="ar">${SORT.dir<0?'▼':'▲'}</span>` : '';
-    return `<th data-k="${c.k}" ${c.nosort?'data-nosort=1':''} title="${c.t}">${c.t} ${ar}</th>`;
+    return `<th class="${c.cls||''}" data-k="${c.k}" ${c.nosort?'data-nosort=1':''}`
+         + ` title="${c.t}">${c.t} ${ar}</th>`;
   }).join('');
   document.querySelectorAll('#hrow th').forEach(th=>{
     if(th.dataset.nosort) return;
@@ -297,7 +376,7 @@ function render(){
   const cols=COLS();
   document.getElementById('tbody').innerHTML = rows.map((r,i)=>
     `<tr data-c="${r.code}" ${SEL===r.code?'aria-selected=true':''}>`
-    + cols.map(c=>`<td>${c.f(r,i)}</td>`).join('') + '</tr>').join('');
+    + cols.map(c=>`<td class="${c.cls||''}">${c.f(r,i)}</td>`).join('') + '</tr>').join('');
   document.querySelectorAll('#tbody tr').forEach(tr=>{
     tr.onclick = () => { SEL = tr.dataset.c; render(); detail(SEL); };
   });
@@ -411,7 +490,8 @@ function detail(code){
       <div class="tile"><div class="k">추정잔고 (D)</div>
         <div class="v est">${F.sh(r.balEst)}</div><div class="s">${F.pct(estNow)}</div></div>
       <div class="tile"><div class="k">5일 증감</div>
-        <div class="v">${F.sgn(r.chg5)}</div><div class="s">20일 ${F.sgn(r.chg20)}</div></div>
+        <div class="v">${F.sgn(r.chg5)}</div>
+        <div class="s">1일 ${F.sgn(r.chg1)} · 20일 ${F.sgn(r.chg20)}</div></div>
       <div class="tile"><div class="k">상장주식수</div>
         <div class="v">${F.sh(r.listShares)}</div><div class="s">&nbsp;</div></div>
       <div class="tile"><div class="k">유동주식수</div>
@@ -613,6 +693,10 @@ setInterval(() => { if(!AGENT.timer) checkAgent(); }, 30000);
 
 document.getElementById('q').oninput = render;
 document.getElementById('mkt').onchange = render;
+document.getElementById('sortsel').onchange = e => {
+  SORT = {key:e.target.value, dir:-1}; render();
+};
+document.getElementById('sortdir').onclick = () => { SORT.dir = -SORT.dir; render(); };
 document.querySelectorAll('#denom button').forEach(b=>{
   b.onclick = () => {
     DENOM=b.dataset.v;

@@ -248,6 +248,9 @@ const F = {
 };
 
 let DATA=null, VIEW=[], SEL=null, DENOM='list';
+/* 시계열(series.json)은 6MB라 첫 화면을 막지 않게 뒤따라 받는다. 그 사이
+   상세 차트가 '수집 안 됨'으로 보이면 거짓말이라 상태를 따로 들고 있는다. */
+let SERIES_STATE='loading';
 let SORT={key:'ratioList', dir:-1};
 
 /* 표는 훑는 곳이고 우측 패널은 파는 곳이다. 그래서 표에는 '지금 얼마이고
@@ -290,13 +293,14 @@ const SPARK = {};
 function spark(r){
   const key = r.code + '|' + DENOM;
   if(key in SPARK) return SPARK[key];
-  const s = DATA.series[r.code];
+  const s = DATA.spark && DATA.spark[r.code];
   const rk = DENOM==='list' ? 'ratioList' : 'ratioFloat';
   if(!s || !s[rk]) return SPARK[key] = '';
 
-  const N=60, W=86, H=22, PAD=2.5;
-  const conf = s[rk].slice(-N);
-  const est  = s.est ? expand(s, rk).slice(-N) : new Array(conf.length).fill(null);
+  const W=86, H=22, PAD=2.5;
+  const conf = s[rk];                       // 빌드에서 이미 60일로 잘라 보낸다
+  const est  = s.est ? expand(s, rk, conf.length)
+                     : new Array(conf.length).fill(null);
   const all  = conf.concat(est).filter(v=>v!=null);
   if(all.length < 2) return SPARK[key] = '';
 
@@ -491,17 +495,29 @@ function lineChart(el, cfg){
   });
 }
 
-/* 추정 구간은 {i, ...} 로 압축돼 온다. 차트가 쓰는 전체 길이 배열로 펼친다. */
-function expand(s, key){
-  const out = new Array(s.dates.length).fill(null);
+/* 추정 구간은 {i, ...} 로 압축돼 온다. 차트가 쓰는 전체 길이 배열로 펼친다.
+   스파크라인은 dates 없이 60개짜리 배열만 있어서 길이를 직접 받는다. */
+function expand(s, key, n){
+  const out = new Array(n ?? s.dates.length).fill(null);
   (s.est[key]||[]).forEach((v,j)=>{ const i=s.est.i+j; if(i<out.length) out[i]=v; });
   return out;
+}
+
+/* series.json 은 {dates, s:{code:rec}} 꼴이다. dates 는 한 벌만 담겨 오고
+   종목별 배열은 그 뒷부분이라, 값 길이로 잘라 처음 볼 때 한 번 붙여둔다. */
+function seriesOf(code){
+  const S=DATA.series;
+  if(!S) return null;
+  const rec=S.s[code];
+  if(!rec) return null;
+  if(!rec.dates) rec.dates = S.dates.slice(-(rec.close||[]).length);
+  return rec;
 }
 
 function detail(code){
   const el=document.getElementById('detail');
   const r=DATA.stocks.find(s=>s.code===code);
-  const s=DATA.series[code];
+  const s=seriesOf(code);
   if(!r){ el.innerHTML='<div class="empty">종목을 선택하세요.</div>'; return; }
 
   const isL = DENOM==='list';
@@ -538,7 +554,9 @@ function detail(code){
 
   if(!s || !s.ratioList){
     document.getElementById('c1').innerHTML =
-      '<div class="empty">공매도 잔고 시계열이 아직 수집되지 않았습니다.</div>';
+      SERIES_STATE==='loading' ? '<div class="empty">시계열 불러오는 중…</div>'
+      : SERIES_STATE==='error' ? '<div class="empty">시계열을 불러오지 못했습니다.</div>'
+      : '<div class="empty">공매도 잔고 시계열이 아직 수집되지 않았습니다.</div>';
   } else {
     lineChart(document.getElementById('c1'), {
       label:`${r.name} 공매도 잔고비율·주가 추이`,
@@ -594,8 +612,18 @@ fetch('dashboard_data.json').then(r=>r.json()).then(d=>{
      — α·β는 종목별 최근 ${'20~60'}거래일 실제 잔고 증감에 대한 절편 없는 OLS로 매일 재추정.
      DTC = 공매도잔고 ÷ 20일 평균거래량. 데이터: KRX(시세·공매도·대차), FnGuide(유동주식수).`;
   render();
-  detail(VIEW[0]?.code);
   SEL = VIEW[0]?.code; render();
+  detail(SEL);
+
+  // 상세 차트용 전체 시계열(6MB)은 표를 다 그린 뒤에 받는다. 도착하면 열려
+  // 있던 종목의 차트만 다시 그린다 — 표는 건드릴 게 없다.
+  fetch('series.json').then(r=>r.json()).then(s=>{
+    DATA.series = s; SERIES_STATE = 'ready';
+    if(SEL) detail(SEL);
+  }).catch(() => {
+    SERIES_STATE = 'error';
+    if(SEL) detail(SEL);
+  });
 });
 
 /* --------------------------------------------------------- 수동 갱신 버튼

@@ -11,7 +11,7 @@
   --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
   --grid:#e1e0d9; --axis:#c3c2b7; --border:rgba(11,11,11,.10);
   --s1:#2a78d6; --s2:#eb6834; --s1soft:rgba(42,120,214,.12);
-  --est:#7b52d3;
+  --est:#7b52d3; --px:#9b9992;
   --up:#d03b3b; --down:#2a78d6; --warn:#fab219;
   --hi:rgba(42,120,214,.08);
 }
@@ -22,7 +22,7 @@
     --ink:#fff; --ink2:#c3c2b7; --muted:#898781;
     --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,.10);
     --s1:#3987e5; --s2:#d95926; --s1soft:rgba(57,135,229,.16);
-    --est:#a385f0;
+    --est:#a385f0; --px:#93918a;
     --up:#e66767; --down:#3987e5;
     --hi:rgba(57,135,229,.12);
   }
@@ -33,7 +33,7 @@
   --ink:#fff; --ink2:#c3c2b7; --muted:#898781;
   --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,.10);
   --s1:#3987e5; --s2:#d95926; --s1soft:rgba(57,135,229,.16);
-  --est:#a385f0;
+  --est:#a385f0; --px:#93918a;
   --up:#e66767; --down:#3987e5;
   --hi:rgba(57,135,229,.12);
 }
@@ -154,7 +154,8 @@ thead th[data-nosort]{cursor:default}
 .tile .k{font-size:11px; color:var(--muted); margin-bottom:3px}
 .tile .v{font-size:16px; font-weight:640; font-variant-numeric:tabular-nums}
 .tile .s{font-size:11px; color:var(--ink2); font-variant-numeric:tabular-nums}
-.legend{display:flex; gap:14px; align-items:center; font-size:12px; color:var(--ink2); margin:4px 0 2px}
+.legend{display:flex; flex-wrap:wrap; gap:5px 13px; align-items:center;
+        font-size:12px; color:var(--ink2); margin:4px 0 2px}
 .legend i{width:11px; height:2.5px; border-radius:2px; display:inline-block; margin-right:5px; vertical-align:middle}
 .chartbox{position:relative}
 svg{display:block; width:100%; overflow:visible}
@@ -239,6 +240,11 @@ const F = {
     return `<span class="${c}">${s}${F.sh(v)}</span>`;
   },
   date: d => d ? `${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}` : '–',
+  won: v => {           // 우축 눈금용 축약. 628원 ~ 460만원까지 6자 안에 든다
+    if(v==null) return '–';
+    if(v>=1e4) return (v/1e4).toFixed(v>=1e5?0:1)+'만';
+    return Math.round(v).toLocaleString('ko-KR');
+  },
 };
 
 let DATA=null, VIEW=[], SEL=null, DENOM='list';
@@ -385,44 +391,65 @@ function render(){
 }
 
 /* ---------------------------------------------------------------- 상세 차트 */
+/* 좌축은 잔고비율(%), 우축은 주가(원). 단위가 4~5자리 다르므로 한 축에 태우면
+   비율선이 바닥에 눌려 붙어 아무것도 안 보인다. 격자선은 좌축 눈금에 맞추고
+   우축은 같은 높이에 자기 값만 적는다. 주가선은 맥락이지 주인공이 아니라서
+   회색·가는 선으로 비율선 뒤에 깐다(back). */
 function lineChart(el, cfg){
-  const W=430, H=200, P={t:12,r:14,b:24,l:44};
-  const iw=W-P.l-P.r, ih=H-P.t-P.b;
   const {dates, series} = cfg;
-  const flat = series.flatMap(s=>s.v).filter(v=>v!=null);
-  if(!flat.length){ el.innerHTML='<div class="empty">표시할 데이터가 없습니다.</div>'; return; }
-  let lo=Math.min(...flat), hi=Math.max(...flat);
-  if(lo===hi){ lo-=1; hi+=1; }
-  const pad=(hi-lo)*0.12; lo=Math.max(0,lo-pad); hi=hi+pad;
-  const X=i=> P.l + (dates.length<2?iw/2:i/(dates.length-1)*iw);
-  const Y=v=> P.t + ih - (v-lo)/(hi-lo)*ih;
+  const hasR = series.some(s=>s.ax==='r');
+  const W=430, H=200, P={t:12, r:hasR?46:14, b:24, l:44};
+  const iw=W-P.l-P.r, ih=H-P.t-P.b;
 
-  const ticks=[]; for(let i=0;i<=4;i++) ticks.push(lo+(hi-lo)*i/4);
+  const range = ax => {
+    const f = series.filter(s=>(s.ax||'l')===ax).flatMap(s=>s.v).filter(v=>v!=null);
+    if(!f.length) return null;
+    let lo=Math.min(...f), hi=Math.max(...f);
+    if(lo===hi){ lo-=1; hi+=1; }
+    const pad=(hi-lo)*0.12;
+    return {lo:Math.max(0,lo-pad), hi:hi+pad};
+  };
+  const R = {l:range('l'), r:range('r')};
+  if(!R.l){ el.innerHTML='<div class="empty">표시할 데이터가 없습니다.</div>'; return; }
+
+  const X=i=> P.l + (dates.length<2?iw/2:i/(dates.length-1)*iw);
+  const Y=(v,ax)=>{ const r=(ax==='r'&&R.r) ? R.r : R.l;
+                    return P.t + ih - (v-r.lo)/(r.hi-r.lo)*ih; };
+
+  const FR=[0,.25,.5,.75,1];
+  const yAt=f=> P.t + ih - f*ih;
+  const vAt=(f,ax)=>{ const r=R[ax]; return r.lo + (r.hi-r.lo)*f; };
+
   const dl=[]; const n=dates.length;
   [0, Math.floor(n/3), Math.floor(2*n/3), n-1].forEach(i=>{ if(i>=0&&i<n&&!dl.includes(i)) dl.push(i); });
 
-  const path = v => {
+  const path = (v, ax) => {
     let d='', pen=false;
     v.forEach((y,i)=>{
       if(y==null){ pen=false; return; }
-      d += (pen?'L':'M') + X(i).toFixed(1) + ' ' + Y(y).toFixed(1) + ' ';
+      d += (pen?'L':'M') + X(i).toFixed(1) + ' ' + Y(y,ax).toFixed(1) + ' ';
       pen=true;
     });
     return d.trim();
   };
 
+  // back:true 인 선을 먼저 그려 뒤로 보낸다. 툴팁 점(dots)은 원래 순서를 쓴다.
+  const ordered = [...series].sort((a,b)=> (a.back?0:1)-(b.back?0:1));
+
   el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${cfg.label}">
-    ${ticks.map(t=>`<line x1="${P.l}" x2="${W-P.r}" y1="${Y(t)}" y2="${Y(t)}"
+    ${FR.map(f=>`<line x1="${P.l}" x2="${W-P.r}" y1="${yAt(f)}" y2="${yAt(f)}"
         stroke="var(--grid)" stroke-width="1"/>`).join('')}
-    ${ticks.map(t=>`<text x="${P.l-7}" y="${Y(t)+3.5}" text-anchor="end"
-        fill="var(--muted)" font-size="10">${cfg.fmt(t)}</text>`).join('')}
+    ${FR.map(f=>`<text x="${P.l-7}" y="${yAt(f)+3.5}" text-anchor="end"
+        fill="var(--muted)" font-size="10">${cfg.fmt(vAt(f,'l'))}</text>`).join('')}
+    ${R.r ? FR.map(f=>`<text x="${W-P.r+7}" y="${yAt(f)+3.5}" text-anchor="start"
+        fill="var(--px)" font-size="10">${cfg.fmtR(vAt(f,'r'))}</text>`).join('') : ''}
     ${cfg.markIdx>0 ? `<line x1="${X(cfg.markIdx)}" x2="${X(cfg.markIdx)}"
         y1="${P.t}" y2="${P.t+ih}" stroke="var(--est)" stroke-width="1" opacity=".35"/>` : ''}
     <line x1="${P.l}" x2="${W-P.r}" y1="${P.t+ih}" y2="${P.t+ih}" stroke="var(--axis)"/>
     ${dl.map(i=>`<text x="${X(i)}" y="${H-6}" text-anchor="${i===0?'start':i===n-1?'end':'middle'}"
         fill="var(--muted)" font-size="10">${dates[i].slice(2,4)}/${dates[i].slice(4,6)}</text>`).join('')}
-    ${series.map(s=>`<path d="${path(s.v)}" fill="none" stroke="${s.c}"
-        stroke-width="2" stroke-linejoin="round" stroke-linecap="round"
+    ${ordered.map(s=>`<path d="${path(s.v, s.ax)}" fill="none" stroke="${s.c}"
+        stroke-width="${s.w||2}" stroke-linejoin="round" stroke-linecap="round"
         ${s.dash?'stroke-dasharray="4 3"':''}/>`).join('')}
     <g id="cross" opacity="0">
       <line y1="${P.t}" y2="${P.t+ih}" stroke="var(--axis)" stroke-width="1"/>
@@ -445,7 +472,7 @@ function lineChart(el, cfg){
       const v=s.v[i];
       if(v==null){ dots[j].setAttribute('opacity','0'); return; }
       dots[j].setAttribute('opacity','1');
-      dots[j].setAttribute('cx',X(i)); dots[j].setAttribute('cy',Y(v));
+      dots[j].setAttribute('cx',X(i)); dots[j].setAttribute('cy',Y(v,s.ax));
     });
     tip.style.opacity='1';
     // 추정선은 미공시 구간에만 값이 있다. 확정 구간에서 '–' 두 줄이 늘 붙는 건
@@ -453,7 +480,7 @@ function lineChart(el, cfg){
     tip.innerHTML = `<b>${F.date(dates[i])}</b>`
       + series.filter(s=>!(s.est && s.v[i]==null))
               .map(s=>`<div class="row"><span style="color:${s.c}">${s.n}</span>
-          <span>${s.v[i]==null?'–':cfg.fmt(s.v[i])}</span></div>`).join('');
+          <span>${s.v[i]==null?'–':(s.fmt||cfg.fmt)(s.v[i])}</span></div>`).join('');
     const bx=svg.getBoundingClientRect();
     const left=(X(i)/W)*bx.width;
     tip.style.left = Math.min(bx.width-tip.offsetWidth-4, Math.max(0,left+10)) + 'px';
@@ -485,7 +512,7 @@ function detail(code){
     <h2>${r.name} <span class="cd">${r.code}</span></h2>
     <div class="sub">${r.market} · 종가 ${F.int(r.close)}원 · 시총 ${F.jo(r.mktcap)}</div>
     <div class="tiles">
-      <div class="tile"><div class="k">공매도잔고 ${DATA.meta.knownDate?'('+F.date(DATA.meta.knownDate)+')':''}</div>
+      <div class="tile"><div class="k">공매도잔고 ${DATA.meta.knownDate?F.date(DATA.meta.knownDate).slice(5):''}</div>
         <div class="v">${F.sh(r.balQty)}</div><div class="s">${F.pct(ratioNow)} ${isL?'상장':'유동'} 대비</div></div>
       <div class="tile"><div class="k">추정잔고 (D)</div>
         <div class="v est">${F.sh(r.balEst)}</div><div class="s">${F.pct(estNow)}</div></div>
@@ -504,6 +531,7 @@ function detail(code){
       <span><i style="background:var(--s1)"></i>상장주식수 대비</span>
       <span><i style="background:var(--s2)"></i>유동주식수 대비</span>
       <span><i style="background:var(--est)"></i>추정 (미공시 구간)</span>
+      <span><i style="background:var(--px)"></i>주가 (우축)</span>
     </div>
     <div class="chartbox" id="c1"></div>
     <div class="note" id="n1"></div>`;
@@ -513,11 +541,14 @@ function detail(code){
       '<div class="empty">공매도 잔고 시계열이 아직 수집되지 않았습니다.</div>';
   } else {
     lineChart(document.getElementById('c1'), {
-      label:`${r.name} 공매도 잔고비율 추이`,
+      label:`${r.name} 공매도 잔고비율·주가 추이`,
       dates:s.dates,
       fmt:v=>v.toFixed(1)+'%',
+      fmtR:F.won,
       markIdx:s.dates.indexOf(DATA.meta.knownDate),   // 확정↔추정 경계
       series:[
+        {n:'주가', v:s.close, c:'var(--px)', ax:'r', w:1.4, back:true,
+         fmt:v=>F.int(v)+'원'},
         {n:'상장 대비', v:s.ratioList, c:'var(--s1)'},
         {n:'유동 대비', v:s.ratioFloat, c:'var(--s2)'},
         ...(s.est ? [

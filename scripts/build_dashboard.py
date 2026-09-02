@@ -24,6 +24,7 @@ FLOAT_CSV = DATA / "free_float.csv"
 PANEL_CSV = DATA / "short_panel.csv"
 COEF_CSV = DATA / "short_coef.csv"
 ESTIMATE_CSV = DATA / "short_estimate.csv"
+EST_PATH_CSV = DATA / "short_estimate_path.csv"
 ICE_CDS_CSV = DATA / "ice_cds.csv"
 
 HIST_DAYS = 250
@@ -79,6 +80,14 @@ def main() -> None:
         est = pd.read_csv(ESTIMATE_CSV, dtype={"code": str, "known_date": str,
                                                "asof": str})
         est["code"] = est["code"].str.zfill(6)
+
+    est_path = None
+    if EST_PATH_CSV.exists():
+        est_path = pd.read_csv(EST_PATH_CSV, dtype={"date": str, "code": str})
+        if not est_path.empty:
+            est_path["code"] = est_path["code"].str.zfill(6)
+            est_path = est_path[est_path["code"].isin(codes)
+                                & est_path["date"].isin(hist_dates)]
 
     has_short = panel is not None and not panel.empty
     log(f"공매도 패널: {'있음' if has_short else '없음 (시세/주식수만 산출)'}")
@@ -175,6 +184,9 @@ def main() -> None:
     px_by = {c: g for c, g in prices.sort_values("date").groupby("code")}
     pn_by = ({c: g for c, g in panel.sort_values("date").groupby("code")}
              if has_short else {})
+    ep_by = ({c: dict(zip(g["date"], g["bal_est"]))
+              for c, g in est_path.groupby("code")}
+             if est_path is not None and not est_path.empty else {})
     for code in base["code"]:
         g = px_by.get(code)
         if g is None or g.empty:
@@ -193,6 +205,30 @@ def main() -> None:
                                  for v in merged["bal_qty"]]
             rec["shortVol"] = [_f(v) for v in merged["short_vol"]]
             rec["loanQty"] = [_f(v) for v in merged["loan_qty"]]
+
+            # 미공시 구간 추정선. 확정선의 마지막 점을 시작점으로 함께 담아
+            # 두 선이 끊기지 않고 이어지게 한다.
+            # 250일 중 3일만 값이 있어 전체 길이 배열로 두면 null 이 1MB 넘게
+            # 붙는다. 시작 인덱스와 구간만 담고 화면에서 펼친다.
+            ep = ep_by.get(code)
+            if ep:
+                ev = [_f(ep.get(d)) for d in merged["date"]]
+                bq = list(merged["bal_qty"])
+                anchor = max((i for i, v in enumerate(bq) if _f(v) is not None),
+                             default=None)
+                if anchor is not None and ev[anchor] is None:
+                    ev[anchor] = _f(bq[anchor])
+                start = next((i for i, v in enumerate(ev) if v is not None), None)
+                if start is not None:
+                    seg = ev[start:]
+                    rec["est"] = {
+                        "i": start,
+                        "balEst": seg,
+                        "ratioList": [_r(v / ls_v * 100) if v is not None and ls_v
+                                      else None for v in seg],
+                        "ratioFloat": [_r(v / fs_v * 100) if v is not None and fs_v
+                                       else None for v in seg],
+                    }
         series[code] = rec
 
     # ---- 신선도 -------------------------------------------------------------

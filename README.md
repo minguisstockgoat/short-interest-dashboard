@@ -210,6 +210,9 @@ Est(D) = Bal(D-2) + Σ_{t∈{D-1, D}} [ α·ΔLoan(t) + β·ShortVol(t) ]
 - α·β는 **종목별 최근 60거래일(최소 12)** 실제 잔고 증감에 대해 **절편 없는 OLS**로 매일 재추정.
 - 표본 부족·설명력 부족(R² < 0.05) 종목은 **유니버스 풀링 회귀** 계수로 폴백(`source=pooled`).
 - 경제적으로 α, β ∈ [0,1]이 자연스러워 추정에는 클리핑값을 쓰고 원값(`alpha_raw`/`beta_raw`)도 보존.
+- D일 스칼라(`short_estimate.csv`)와 별도로 미공시 구간의 **일자별 경로**를
+  `short_estimate_path.csv`에 남긴다. 대시보드 차트는 확정선의 마지막 점을
+  추정선의 시작점으로 삼아 **다른 색으로 이어 그린다**(확정↔추정 경계에 세로선).
 
 ## 데이터 소스
 
@@ -271,7 +274,7 @@ scripts/
   fnguide_float.py   FnGuide 유동주식수 수집
   krx_session.py     크롬(CDP) 로그인 세션 대여
   krx_short.py       공매도 잔고·거래량 수집 (--from-cache 복원 지원)
-  estimate.py        α·β 회귀 + D일 추정잔고
+  estimate.py        α·β 회귀 + D일 추정잔고(+ 미공시 구간 일자별 추정 경로)
   build_dashboard.py web/dashboard_data.json 생성
   cdp_capture.py     KRX 화면의 bld/파라미터 캡처 (신규 화면 추가용)
   cdp_listen.py      수동 조작 대기형 캡처
@@ -296,6 +299,6 @@ docs/                GitHub Pages 게시 대상
 data/
   prices.csv  master.csv  universe.csv  free_float.csv
   short_balance.csv  short_volume.csv  short_panel.csv
-  short_coef.csv  short_estimate.csv
+  short_coef.csv  short_estimate.csv  short_estimate_path.csv
   raw/               원본 캐시 (재수집 없이 복원 가능)
 ```

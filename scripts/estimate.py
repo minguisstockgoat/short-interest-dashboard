@@ -36,6 +36,7 @@ from common import (DATA, LOAN_BAL_CSV, SHORT_BAL_CSV, SHORT_VOL_CSV, log)
 
 COEF_CSV = DATA / "short_coef.csv"
 ESTIMATE_CSV = DATA / "short_estimate.csv"
+EST_PATH_CSV = DATA / "short_estimate_path.csv"
 PANEL_CSV = DATA / "short_panel.csv"
 
 ALPHA_CLIP = (0.0, 1.0)
@@ -181,6 +182,20 @@ def estimate(panel: pd.DataFrame, coef: pd.DataFrame, asof: str | None = None) -
                         + gap["beta"].fillna(0) * gap["short_vol"].fillna(0))
     inc = gap.groupby("code")["delta_hat"].sum().rename("delta_hat_sum")
 
+    # 미공시 구간의 '일자별' 추정 경로. D일 스칼라만 있으면 대시보드가 D-1을
+    # 그릴 수 없어 잔고 선이 확정일에서 끊긴다. D-2 확정값에서 하루씩 누적한
+    # 값을 따로 떨궈 차트가 확정 구간에 이어붙일 수 있게 한다.
+    # 마지막 날 값은 정의상 out["bal_est"] 와 정확히 일치한다.
+    if gap.empty:
+        path = pd.DataFrame(columns=["date", "code", "bal_est"])
+    else:
+        path = gap.sort_values(["code", "date"]).copy()
+        path["cum"] = path.groupby("code")["delta_hat"].cumsum()
+        path = path.join(base, on="code").dropna(subset=["bal_known"])
+        path["bal_est"] = (path["bal_known"] + path["cum"]).clip(lower=0)
+        path = path[["date", "code", "bal_est"]]
+    path.to_csv(EST_PATH_CSV, index=False, encoding="utf-8-sig")
+
     out = base.join(inc, how="left").join(cm, how="left")
     out["delta_hat_sum"] = out["delta_hat_sum"].fillna(0.0)
     out["bal_est"] = out["bal_known"] + out["delta_hat_sum"]
@@ -192,6 +207,8 @@ def estimate(panel: pd.DataFrame, coef: pd.DataFrame, asof: str | None = None) -
     out.to_csv(ESTIMATE_CSV, index=False, encoding="utf-8-sig")
     log(f"추정 저장: {ESTIMATE_CSV.name} {len(out)}종목 "
         f"(확정 {last_known} → 추정 {asof}, 보간 {len(gap_dates)}거래일)")
+    log(f"추정 경로 저장: {EST_PATH_CSV.name} {len(path):,}행 "
+        f"({', '.join(gap_dates) if gap_dates else '없음'})")
     return out
 
 

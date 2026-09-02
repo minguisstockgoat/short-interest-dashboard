@@ -1,10 +1,18 @@
 # -*- coding: utf-8 -*-
 """대시보드용 JSON 산출.
 
-web/dashboard_data.json 구조
+두 파일로 나눠 쓴다. 표를 그리는 데 필요한 건 stocks(0.2MB)뿐인데 시계열이
+6MB라, 한 파일이면 첫 화면이 전부 받을 때까지 아무것도 안 나온다.
+
+web/dashboard_data.json  — 첫 화면용 (작다)
   meta   : 기준일·확정일·유니버스 정보
   stocks : 종목별 최신 스냅샷 (랭킹 테이블용)
-  series : 종목별 시계열 (상세 차트용)
+  spark  : 표 안 스파크라인용 최근 60거래일 잔고비율만
+
+web/series.json          — 상세 차트용 (크다, 화면 그린 뒤 뒤따라 받는다)
+  dates  : 공통 날짜 배열 한 벌
+  s      : 종목별 시계열. dates 는 담지 않는다 — 모든 종목이 공통 배열의
+           뒷부분이라(신규상장은 짧다) 값 배열 길이로 잘라 쓴다.
 
 공매도/대차 원본이 아직 없으면 해당 필드를 비운 채로 생성한다.
 """
@@ -18,6 +26,8 @@ import pandas as pd
 
 from common import DASHBOARD_JSON, DATA, MIN_MKTCAP, log
 
+SERIES_JSON = DASHBOARD_JSON.with_name("series.json")
+
 UNIVERSE_CSV = DATA / "universe.csv"
 PRICES_CSV = DATA / "prices.csv"
 FLOAT_CSV = DATA / "free_float.csv"
@@ -28,6 +38,7 @@ EST_PATH_CSV = DATA / "short_estimate_path.csv"
 ICE_CDS_CSV = DATA / "ice_cds.csv"
 
 HIST_DAYS = 250
+SPARK_DAYS = 60     # 표 안 스파크라인이 보여주는 구간
 
 
 def _f(x):
@@ -245,6 +256,45 @@ def main() -> None:
         if not sv.empty:
             short_vol_asof = sv["date"].max()
 
+    # ---- 출력 분리 -----------------------------------------------------------
+    def _trim(rec):
+        """표 안 스파크라인용으로 최근 SPARK_DAYS 만 남긴다. 높이 22px 짜리
+        선이라 소수 2자리면 남는다."""
+        rl = rec.get("ratioList")
+        if not rl:
+            return None
+        cut = max(0, len(rl) - SPARK_DAYS)
+        out = {"ratioList": [_r(v, 2) for v in rl[cut:]],
+               "ratioFloat": [_r(v, 2) for v in rec.get("ratioFloat", [])[cut:]]}
+        e = rec.get("est")
+        if e:
+            out["est"] = {"i": max(0, e["i"] - cut),
+                          "ratioList": [_r(v, 2) for v in e["ratioList"]],
+                          "ratioFloat": [_r(v, 2) for v in e["ratioFloat"]]}
+        return out
+
+    spark = {}
+    for c, r in series.items():
+        t = _trim(r)
+        if t:
+            spark[c] = t
+
+    # 시계열의 dates 는 종목마다 담으면 그것만 1.2MB다. 모두 공통 배열의
+    # 뒷부분이므로(신규상장은 짧게 시작한다) 한 벌만 담고 화면에서 값 배열
+    # 길이로 잘라 쓴다. 혹시 뒷부분이 아닌 종목이 나오면 그 종목만 자기
+    # dates 를 들고 가게 해서 조용히 어긋나지 않게 한다.
+    shared_dates = max((r["dates"] for r in series.values()), key=len, default=[])
+    series_out, own = {}, 0
+    for c, r in series.items():
+        rec = {k: v for k, v in r.items() if k != "dates"}
+        n = len(r["dates"])
+        if n and r["dates"] != shared_dates[-n:]:
+            rec["dates"] = r["dates"]
+            own += 1
+        series_out[c] = rec
+    if own:
+        log(f"공통 날짜와 어긋나 자체 dates 를 담은 종목: {own}")
+
     payload = {
         "meta": {
             "asof": asof, "knownDate": known_date,
@@ -257,7 +307,7 @@ def main() -> None:
             "generatedAt": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M"),
         },
         "stocks": stocks,
-        "series": series,
+        "spark": spark,
     }
     if ICE_CDS_CSV.exists():
         cds = pd.read_csv(ICE_CDS_CSV, dtype={"clearing_date": str, "ticker": str})
@@ -278,11 +328,15 @@ def main() -> None:
             "items": items,
         }
 
-    DASHBOARD_JSON.write_text(json.dumps(payload, ensure_ascii=False,
-                                         separators=(",", ":")), encoding="utf-8")
+    _dump = lambda path, obj: path.write_text(
+        json.dumps(obj, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+
+    _dump(DASHBOARD_JSON, payload)
+    _dump(SERIES_JSON, {"dates": shared_dates, "s": series_out})
     mb = DASHBOARD_JSON.stat().st_size / 1e6
-    log(f"저장: {DASHBOARD_JSON} ({mb:.1f} MB, {len(stocks)}종목, "
-        f"시계열 {len(series)}종목 x {len(hist_dates)}일)")
+    smb = SERIES_JSON.stat().st_size / 1e6
+    log(f"저장: {DASHBOARD_JSON.name} ({mb:.2f} MB, 첫 화면용 {len(stocks)}종목) + "
+        f"{SERIES_JSON.name} ({smb:.2f} MB, 시계열 {len(series)}종목 x {len(hist_dates)}일)")
     if short_stale:
         log(f"⚠ 공매도 잔고가 정상(T+2)보다 {short_stale}거래일 더 지연됨 "
             f"(확정 {known_date} / 기준 {asof})")

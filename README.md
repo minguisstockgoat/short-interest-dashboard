@@ -43,15 +43,16 @@ tar -xzf bootstrap_data.tar.gz       # Windows에서 만든 데이터 이관 (�
 .venv/bin/python scripts/krx_login.py --status    # 세션 확인
 bash mac/doctor.sh                   # 환경 점검
 bash mac/daily.sh                    # 수동 1회
-bash mac/install_schedule.sh         # 평일 22:00 등록 (시각 변경: 20 00)
+bash mac/install_schedule.sh         # 평일 20:10 등록 (시각 변경: 21 00)
 bash mac/install_schedule.sh --uninstall
 ```
 
-`install_schedule.sh` 는 launchd 작업 **세 개**를 등록한다.
+`install_schedule.sh` 는 launchd 작업 **네 개**를 등록한다.
 
 | 라벨 | 성격 | 하는 일 |
 |---|---|---|
-| `com.shortdashboard.daily` | 평일 22:00 1회 | 갱신 + 커밋·푸시 |
+| `com.shortdashboard.daily` | 평일 20:10 1회 | 갱신 + 커밋·푸시 |
+| `com.shortdashboard.morning` | 평일 08:20 1회 | 전일 시세 지연·정정 보완 + 커밋·푸시 |
 | `com.shortdashboard.keepalive` | 상주 | 5분마다 세션 점검 → 없으면 자동 로그인 후 갱신·배포 |
 | `com.shortdashboard.agent` | 상주 | 대시보드 '수동 갱신' 버튼 수신 (127.0.0.1:8776) |
 
@@ -61,8 +62,8 @@ launchd는 cron과 달리 맥이 잠들어 있던 시간대의 작업을 깨어�
 ### Windows
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\install_schedule.ps1              # 평일 22:00
-powershell -ExecutionPolicy Bypass -File .\install_schedule.ps1 -Time 20:00
+powershell -ExecutionPolicy Bypass -File .\install_schedule.ps1              # 평일 20:10
+powershell -ExecutionPolicy Bypass -File .\install_schedule.ps1 -Time 21:00
 powershell -ExecutionPolicy Bypass -File .\install_schedule.ps1 -Uninstall
 ```
 

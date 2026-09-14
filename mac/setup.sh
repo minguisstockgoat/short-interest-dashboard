@@ -88,5 +88,5 @@ echo "  4) bash mac/launch_chrome.sh    → 전용 크롬이 뜨면 네이버로
 echo "  5) .venv/bin/python scripts/krx_login.py --status  → 세션 유효 확인"
 echo "  6) bash mac/doctor.sh          → 환경 점검"
 echo "  7) bash mac/daily.sh           → 수동 1회 실행"
-echo "  8) bash mac/install_schedule.sh → 평일 22:00 자동 실행 + 세션유지 + 갱신버튼 등록"
+echo "  8) bash mac/install_schedule.sh → 평일 20:10 자동 실행 + 세션유지 + 갱신버튼 등록"
 echo

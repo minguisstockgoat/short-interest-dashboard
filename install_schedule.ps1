@@ -2,14 +2,14 @@
 #  일일 자동 갱신 작업 등록 (Windows 작업 스케줄러)
 #
 #    powershell -ExecutionPolicy Bypass -File .\install_schedule.ps1
-#    powershell -ExecutionPolicy Bypass -File .\install_schedule.ps1 -Time "20:00"
+#    powershell -ExecutionPolicy Bypass -File .\install_schedule.ps1 -Time "21:00"
 #    powershell -ExecutionPolicy Bypass -File .\install_schedule.ps1 -Uninstall
 #
 #  평일에 지정 시각으로 daily.ps1 을 실행한다.
 #  1차 실행이 실패하면 2시간 뒤까지 30분 간격으로 재시도한다.
 # ============================================================
 param(
-    [string]$Time = "22:00",
+    [string]$Time = "20:10",
     [string]$TaskName = "ShortInterestDashboard",
     [switch]$Uninstall
 )

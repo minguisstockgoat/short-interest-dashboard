@@ -2,9 +2,9 @@
 # ============================================================
 #  자동 실행 등록 (launchd) — macOS
 #
-#    bash mac/install_schedule.sh              # 평일 22:00 + 아침 08:20
-#    bash mac/install_schedule.sh 20 00        # 저녁만 20:00 으로
-#    bash mac/install_schedule.sh 22 0 8 30    # 아침 시각까지 지정
+#    bash mac/install_schedule.sh              # 평일 20:10 + 아침 08:20
+#    bash mac/install_schedule.sh 21 00        # 저녁만 21:00 으로
+#    bash mac/install_schedule.sh 20 10 8 30   # 아침 시각까지 지정
 #    bash mac/install_schedule.sh --uninstall
 #
 #  네 가지를 등록한다.
@@ -13,11 +13,9 @@
 #    com.shortdashboard.keepalive 상주 — 5분마다 로그인 감지, 감지 즉시 갱신 실행
 #    com.shortdashboard.agent     상주 — 대시보드 수동 갱신 버튼 수신
 #
-#  아침 실행이 따로 필요한 이유: KRX OpenAPI 는 당일 시세를 '다음날 아침 8시경'에
-#  공표한다. 그래서 저녁 22:00 실행은 그날 시세를 못 받고, 기준일이 하루 전에
-#  묶인다(build_dashboard 는 기준일을 prices.csv 에서 뽑는다). 확정 잔고는 이미
-#  있는데 시세가 없어서 잘리는 것. 08:20 에 한 번 더 돌리면 개장 전에 D-1 추정까지
-#  채워진다. 공표가 늦어지면 그날은 저녁과 같은 결과가 나올 뿐 손해는 없다.
+#  저녁 실행은 KRX 20:00 운영 종료 뒤 20:10 에 시작해 당일 시세를 받는다.
+#  아침 실행은 전날 시세의 공표 지연이나 정정에 대비한 보완 작업이다. 저녁에 이미
+#  같은 데이터가 반영됐다면 docs 변경이 없어 배포를 생략한다.
 #
 #  launchd는 cron과 달리 맥이 잠들어 있던 시간대의 작업을 깨어난 직후 실행한다.
 #  상주 작업(KeepAlive)은 죽으면 자동으로 다시 뜬다.
@@ -46,8 +44,8 @@ if [[ "${1:-}" == "--uninstall" ]]; then
   exit 0
 fi
 
-HOUR="${1:-22}"
-MIN="${2:-0}"
+HOUR="${1:-20}"
+MIN="${2:-10}"
 HOUR=$((10#$HOUR))
 MIN=$((10#$MIN))
 

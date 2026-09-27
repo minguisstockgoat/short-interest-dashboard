@@ -184,8 +184,22 @@ def run_pipeline(a) -> int:
         f"데이터 갱신 {meta['asof']} (확정 {meta['knownDate']})", "--", "docs")
     r = git("push", "-q", "origin", "main", check=False)
     if r.returncode != 0:
-        log(f"푸시 실패: {r.stderr.strip()[:200]}")
+        err = r.stderr.strip()[:200]
+        log(f"푸시 실패: {err}")
+        # 수집·추정·커밋이 다 끝난 뒤라 로컬만 보면 멀쩡하다. 알리지 않으면
+        # 공개본만 조용히 멈춘 채 며칠이 간다 — 볼트 토큰 만료로 2026-09-16~27
+        # 11일을 그렇게 흘렸다. 기준일 경보와 같은 이유로 사람을 불러야 한다.
+        import notify
+        notify.send(
+            "❌ 대시보드 배포(push)가 실패했습니다.\n"
+            f"기준일 {meta['asof']} / 확정 {meta['knownDate']} 까지 수집·커밋은 정상이고, "
+            "공개본만 갱신이 멈춥니다.\n\n"
+            f"{err}\n\n"
+            "토큰 만료면 ~/.config/secrets/keys.env 의 GITHUB_TOKEN 을 갈아주세요.",
+            dedupe="push-failed", cooldown_h=20)
         return 1
+    import notify
+    notify.clear("push-failed")
     log("배포 완료 → https://minguisstockgoat.github.io/short-interest-dashboard/")
 
     for old in sorted(LOGS.glob("pipeline_*.log"))[:-30]:

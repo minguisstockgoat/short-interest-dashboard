@@ -35,6 +35,7 @@ from common import DATA, ROOT, log
 
 HEARTBEAT = DATA / ".keepalive.json"
 WATCH_STATE = DATA / ".watch_state.json"
+PIPELINE_STATUS = DATA / ".pipeline_status.json"
 
 # KRX 세션 수명(관측값). 로그인 시각 기준이며 활동해도 늘지 않는다.
 SESSION_LIFETIME = 1800          # 약 30분
@@ -81,7 +82,19 @@ def save_watch(s: dict) -> None:
 
 
 def ran_today(w: dict) -> bool:
-    return w.get("last_run_date") == dt.date.today().strftime("%Y%m%d")
+    today = dt.date.today()
+    if w.get("last_run_date") == today.strftime("%Y%m%d"):
+        return True
+
+    # daily.sh 나 수동 갱신은 keepalive 의 watch 파일을 갱신하지 않는다.
+    # 대신 파이프라인 공통 상태가 오늘 성공으로 끝났다면 이미 실행한 것으로 본다.
+    try:
+        status = json.loads(PIPELINE_STATUS.read_text(encoding="utf-8"))
+        return (status.get("state") == "done"
+                and status.get("exit") == 0
+                and str(status.get("at", "")).startswith(today.isoformat()))
+    except (OSError, ValueError):
+        return False
 
 
 def run_pipeline() -> int:

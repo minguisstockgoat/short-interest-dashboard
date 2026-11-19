@@ -136,16 +136,39 @@ def run_pipeline(a) -> int:
 
     # --- 산출물 검증 ---------------------------------------------------
     out = DOCS / "dashboard_data.json"
+    series_out = DOCS / "series.json"
     if not out.exists():
         log("중단: dashboard_data.json 없음")
         return 1
-    size = out.stat().st_size
-    if size < 500_000:
-        log(f"중단: dashboard_data.json 이 비정상적으로 작음 ({size:,} bytes)")
+    if not series_out.exists():
+        log("중단: series.json 없음")
         return 1
-    meta = json.loads(out.read_text(encoding="utf-8"))["meta"]
+
+    size = out.stat().st_size
+    series_size = series_out.stat().st_size
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    series_payload = json.loads(series_out.read_text(encoding="utf-8"))
+    meta = payload.get("meta", {})
+    stocks = payload.get("stocks", [])
+    spark = payload.get("spark", {})
+    series = series_payload.get("s", {})
+    expected = meta.get("universe", 0)
+
+    # 첫 화면용 JSON 과 상세 차트용 JSON 을 분리한 뒤에는 dashboard_data.json
+    # 크기만으로 정상 여부를 판단할 수 없다. 파일 구조와 종목 수를 함께 본다.
+    if size < 100_000 or len(stocks) < expected or len(spark) < expected:
+        log("중단: dashboard_data.json 검증 실패 "
+            f"({size:,} bytes, stocks {len(stocks)}/{expected}, "
+            f"spark {len(spark)}/{expected})")
+        return 1
+    if series_size < 1_000_000 or len(series) < expected:
+        log("중단: series.json 검증 실패 "
+            f"({series_size:,} bytes, series {len(series)}/{expected})")
+        return 1
+
     log(f"기준일 {meta['asof']} / 확정일 {meta['knownDate']} / "
-        f"{meta['universe']}종목 / {size/1e6:.2f} MB")
+        f"{meta['universe']}종목 / 첫 화면 {size/1e6:.2f} MB + "
+        f"시계열 {series_size/1e6:.2f} MB")
 
     # --- 공매도 신선도 경보 ---------------------------------------------
     # 스케줄러가 돌아도 KRX 단계만 조용히 멈추는 게 실제로 겪은 사고였다.
